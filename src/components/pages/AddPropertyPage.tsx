@@ -63,7 +63,7 @@ export const AddPropertyPage: React.FC<AddPropertyPageProps> = ({
   const [uploadedImages, setUploadedImages] = useState<PropertyImage[]>([
     {
       publicId: 'initial_nairobi_cover',
-      secureUrl: '/src/assets/images/property_westlands_apartment_1794311302942.jpg',
+      secureUrl: '/images/property_westlands_apartment_1794311302942.jpg',
       format: 'jpg',
       resourceType: 'image',
       sortOrder: 0,
@@ -76,19 +76,19 @@ export const AddPropertyPage: React.FC<AddPropertyPageProps> = ({
   const presetShortcuts = [
     {
       label: 'Karen Villa Exterior',
-      url: '/src/assets/images/property_karen_villa_1794311303595.jpg',
+      url: '/images/property_karen_villa_1794311303595.jpg',
     },
     {
       label: 'Kilimani Penthouse Terrace',
-      url: '/src/assets/images/property_kilimani_penthouse_1794311304830.jpg',
+      url: '/images/property_kilimani_penthouse_1794311304830.jpg',
     },
     {
       label: 'Chic Modern Studio',
-      url: '/src/assets/images/property_studio_modern_1794311304710.jpg',
+      url: '/images/property_studio_modern_1794311304710.jpg',
     },
     {
       label: 'Sunset Infinity Pool Villa',
-      url: '/src/assets/images/hero_nairobi_luxury_home_1794311302389.jpg',
+      url: '/images/hero_nairobi_luxury_home_1794311302389.jpg',
     },
   ];
 

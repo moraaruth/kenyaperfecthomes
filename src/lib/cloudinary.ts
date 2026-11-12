@@ -19,12 +19,12 @@ export function getOptimizedImageUrl(
   options: ImageTransformOptions = {}
 ): string {
   if (!imageInput) {
-    return '/src/assets/images/property_westlands_apartment_1794311302942.jpg';
+    return '/images/property_westlands_apartment_1794311302942.jpg';
   }
 
   const rawUrl = typeof imageInput === 'string' ? imageInput : imageInput.secureUrl;
   if (!rawUrl) {
-    return '/src/assets/images/property_westlands_apartment_1794311302942.jpg';
+    return '/images/property_westlands_apartment_1794311302942.jpg';
   }
 
   // If this is a Cloudinary URL, inject optimal transformation parameters
@@ -112,7 +112,7 @@ export function normalizePropertyImages(images: (PropertyImage | string)[] | und
     return [
       {
         publicId: 'default_property_img',
-        secureUrl: '/src/assets/images/property_westlands_apartment_1794311302942.jpg',
+        secureUrl: '/images/property_westlands_apartment_1794311302942.jpg',
         format: 'jpg',
         resourceType: 'image',
         sortOrder: 0,
@@ -157,5 +157,5 @@ export function normalizePropertyImages(images: (PropertyImage | string)[] | und
 export function getCoverImageUrl(images: (PropertyImage | string)[] | undefined): string {
   const normalized = normalizePropertyImages(images);
   const cover = normalized.find((img) => img.isCover) || normalized[0];
-  return cover ? cover.secureUrl : '/src/assets/images/property_westlands_apartment_1794311302942.jpg';
+  return cover ? cover.secureUrl : '/images/property_westlands_apartment_1794311302942.jpg';
 }

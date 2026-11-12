@@ -26,7 +26,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ onSearch, onSelectNeig
   return (
     <section className="relative min-h-[600px] lg:min-h-[640px] flex items-center justify-center overflow-hidden bg-neutral-900">
       <img
-        src="/src/assets/images/hero_nairobi_luxury_home_1794311302389.jpg"
+        src="/images/hero_nairobi_luxury_home_1794311302389.jpg"
         alt="Modern home in Nairobi"
         className="absolute inset-0 w-full h-full object-cover object-center"
       />
