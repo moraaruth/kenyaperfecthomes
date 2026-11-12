@@ -2,7 +2,6 @@ import express, { Request, Response } from 'express';
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import multer from 'multer';
 import cookieParser from 'cookie-parser';
 import https from 'https';
@@ -42,9 +41,6 @@ import {
 } from './src/lib/userAuth.ts';
 
 dotenv.config();
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -142,36 +138,30 @@ const upload = multer({
 let inMemoryProperties: any[] = [];
 let inMemoryBookings: any[] = [];
 let inMemoryInquiries: any[] = [];
-let isMongoConnected = false;
+
+// Always read live connection state — never stale after ensureDatabase() resolves
+const isMongoConnected = () => mongoose.connection.readyState === 1;
 
 // Cached connection promise — reused across serverless invocations in the same container
 let _dbConnectionPromise: Promise<void> | null = null;
 
 export async function ensureDatabase(): Promise<void> {
-  // Already connected
-  if (mongoose.connection.readyState === 1) {
-    isMongoConnected = true;
-    return;
-  }
+  if (mongoose.connection.readyState === 1) return;
 
   const mongoUri = process.env.MONGODB_URI;
   if (!mongoUri) {
     console.log('[Database] MONGODB_URI not set. Running with in-memory storage.');
-    isMongoConnected = false;
     return;
   }
 
-  // Reuse in-flight connection attempt
   if (!_dbConnectionPromise) {
     _dbConnectionPromise = mongoose
       .connect(mongoUri, { bufferCommands: false })
       .then(() => {
-        isMongoConnected = true;
         console.log('[Database] Connected to MongoDB.');
       })
       .catch((err) => {
         _dbConnectionPromise = null;
-        isMongoConnected = false;
         console.error('[Database] Connection failed:', err.message);
       });
   }
@@ -179,10 +169,7 @@ export async function ensureDatabase(): Promise<void> {
   await _dbConnectionPromise;
 }
 
-// Non-serverless startup: connect immediately
-if (!process.env.VERCEL) {
-  ensureDatabase();
-}
+
 
 // ==========================================
 // AUTHENTICATION & AUTHORIZATION ENDPOINTS
@@ -760,7 +747,7 @@ app.get('/api/properties', async (req: Request, res: Response) => {
   try {
     const { keyword, propertyType, listingType, minPrice, maxPrice, bedrooms, sort } = req.query;
 
-    if (isMongoConnected) {
+    if (isMongoConnected()) {
       const query: any = {};
 
       if (keyword) {
@@ -852,7 +839,7 @@ app.get('/api/properties/:slugOrId', async (req: Request, res: Response) => {
   try {
     const { slugOrId } = req.params;
 
-    if (isMongoConnected) {
+    if (isMongoConnected()) {
       const property = await PropertyModel.findOne({
         $or: [{ slug: slugOrId }, { _id: mongoose.isValidObjectId(slugOrId) ? slugOrId : null }],
       }).lean();
@@ -936,7 +923,7 @@ app.post('/api/properties', requireAdminAuth as any, async (req: AuthenticatedRe
       createdAt: new Date().toISOString(),
     };
 
-    if (isMongoConnected) {
+    if (isMongoConnected()) {
       const created = await PropertyModel.create(newPropertyData);
       return res.status(201).json(created);
     }
@@ -960,7 +947,7 @@ app.patch('/api/properties/:id', requireAdminAuth as any, async (req: Authentica
     const { id } = req.params;
     const updates = req.body;
 
-    if (isMongoConnected) {
+    if (isMongoConnected()) {
       const updated = await PropertyModel.findByIdAndUpdate(id, updates, { new: true });
       if (!updated) return res.status(404).json({ error: 'Property not found' });
       return res.json(updated);
@@ -986,7 +973,7 @@ app.delete('/api/properties/:id', requireAdminAuth as any, async (req: Authentic
   try {
     const { id } = req.params;
 
-    if (isMongoConnected) {
+    if (isMongoConnected()) {
       const deleted = await PropertyModel.findByIdAndDelete(id);
       if (!deleted) return res.status(404).json({ error: 'Property not found' });
       return res.json({ success: true, message: 'Property deleted successfully' });
@@ -1031,7 +1018,7 @@ app.post('/api/bookings', async (req: Request, res: Response) => {
       createdAt: new Date().toISOString(),
     };
 
-    if (isMongoConnected) {
+    if (isMongoConnected()) {
       const doc = await BookingModel.create(bookingData);
       return res.status(201).json({ success: true, booking: doc });
     }
@@ -1045,7 +1032,7 @@ app.post('/api/bookings', async (req: Request, res: Response) => {
 
 // GET /api/admin/bookings (Protected: Admin viewing schedule)
 app.get('/api/admin/bookings', requireAdminAuth as any, async (_req: AuthenticatedRequest, res: Response) => {
-  if (isMongoConnected) {
+  if (isMongoConnected()) {
     const docs = await BookingModel.find().sort({ createdAt: -1 }).lean();
     return res.json(docs);
   }
@@ -1069,7 +1056,7 @@ app.post('/api/contact', async (req: Request, res: Response) => {
       createdAt: new Date().toISOString(),
     };
 
-    if (isMongoConnected) {
+    if (isMongoConnected()) {
       await InquiryModel.create(inquiryData);
     } else {
       inMemoryInquiries.push({ ...inquiryData, _id: 'inq-' + Date.now() });
@@ -1083,7 +1070,7 @@ app.post('/api/contact', async (req: Request, res: Response) => {
 
 // GET /api/admin/inquiries (Protected: Admin inquiries)
 app.get('/api/admin/inquiries', requireAdminAuth as any, async (_req: AuthenticatedRequest, res: Response) => {
-  if (isMongoConnected) {
+  if (isMongoConnected()) {
     const docs = await InquiryModel.find().sort({ createdAt: -1 }).lean();
     return res.json(docs);
   }
@@ -1095,8 +1082,13 @@ app.get('/api/admin/inquiries', requireAdminAuth as any, async (_req: Authentica
 // ==========================================
 
 async function startServer() {
+  const { fileURLToPath } = await import('url');
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = path.dirname(__filename);
+
+  await ensureDatabase();
+
   if (!isProduction) {
-    // In dev mode, mount Vite middleware for instant updates & SPA handling
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -1104,7 +1096,6 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    // Production static serving
     const distPath = path.resolve(__dirname, 'dist');
     app.use(express.static(distPath));
     app.get('*', (_req, res) => {
@@ -1119,7 +1110,7 @@ async function startServer() {
 
 export default app;
 
-// Vercel runs the exported app as a serverless function (see api/[...route].ts)
+// Only start the long-running server outside of Vercel serverless
 if (!process.env.VERCEL) {
   startServer();
 }

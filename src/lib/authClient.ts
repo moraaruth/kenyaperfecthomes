@@ -92,8 +92,8 @@ export async function checkAdminSession(): Promise<AuthStatus> {
         user: data.user || null,
       };
     }
-  } catch (err) {
-    console.error('Session check error:', err);
+  } catch {
+    // silent — session check failure is not an error worth logging
   }
 
   return { authenticated: false, authorized: false, user: null };
