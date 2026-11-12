@@ -48,8 +48,10 @@ export async function fetchProperties(filters?: SearchFilters): Promise<Property
         return data;
       }
     }
+    // Server responded with an error (e.g. database unavailable): do not show local-only data
+    return [];
   } catch {
-    // Fall back to client storage
+    // Network failure: fall back to client storage
   }
 
   let list = getStoredProperties();
@@ -116,27 +118,13 @@ export async function addProperty(propertyData: Omit<Property, '_id' | 'createdA
       body: JSON.stringify(newProp),
     });
     if (res.ok) {
-      const saved = await res.json();
-      if (saved && saved._id) {
-        const list = getStoredProperties();
-        saveStoredProperties([saved, ...list]);
-        return saved;
-      }
-    } else if (res.status === 401 || res.status === 403) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'Unauthorized: Only allowed administrators can create properties.');
+      return await res.json();
     }
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Failed to add property (HTTP ${res.status})`);
   } catch (err: any) {
-    if (err.message && err.message.includes('Unauthorized')) {
-      throw err;
-    }
-    // fallback
+    throw err instanceof Error ? err : new Error('Failed to add property');
   }
-
-  const list = getStoredProperties();
-  const updated = [newProp, ...list];
-  saveStoredProperties(updated);
-  return newProp;
 }
 
 // Update property (Protected)

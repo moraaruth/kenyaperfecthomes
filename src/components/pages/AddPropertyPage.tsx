@@ -170,8 +170,8 @@ export const AddPropertyPage: React.FC<AddPropertyPageProps> = ({
 
       setCreatedProperty(newProp);
       onPropertyAdded(newProp);
-    } catch {
-      alert('Failed to publish listing. Please try again.');
+    } catch (err) {
+      alert(err instanceof Error ? `Failed to publish listing: ${err.message}` : 'Failed to publish listing. Please try again.');
     } finally {
       setIsSubmitting(false);
     }

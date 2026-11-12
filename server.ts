@@ -753,6 +753,18 @@ app.delete('/api/images/:publicId', requireAdminAuth as any, async (req: Authent
 // ==========================================
 
 // GET /api/properties (Public)
+// On Vercel, in-memory storage is per container and invisible to other requests,
+// so property routes must fail loudly instead of silently losing writes.
+const IS_SERVERLESS = Boolean(process.env.VERCEL);
+app.use('/api/properties', (_req: Request, res: Response, next: NextFunction) => {
+  if (IS_SERVERLESS && !isMongoConnected()) {
+    return res.status(503).json({
+      error: 'Database not connected. Check MONGODB_URI in Vercel environment variables.',
+    });
+  }
+  next();
+});
+
 app.get('/api/properties', async (req: Request, res: Response) => {
   try {
     const { keyword, propertyType, listingType, minPrice, maxPrice, bedrooms, sort } = req.query;
