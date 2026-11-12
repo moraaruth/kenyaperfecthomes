@@ -20,9 +20,13 @@ let _conn: Promise<typeof mongoose> | null = null;
 async function connectDB() {
   if (mongoose.connection.readyState === 1) return;
   const uri = process.env.MONGODB_URI;
-  if (!uri) return;
+  if (!uri) {
+    console.error('[MongoDB] MONGODB_URI is not set in this environment. Add it in Vercel Project Settings > Environment Variables.');
+    return;
+  }
   if (!_conn) {
-    _conn = mongoose.connect(uri, { bufferCommands: false }).catch((e) => {
+    _conn = mongoose.connect(uri, { bufferCommands: false, serverSelectionTimeoutMS: 8000 }).catch((e) => {
+      console.error('[MongoDB] Connection failed:', e?.name, e?.message);
       _conn = null;
       throw e;
     });
@@ -185,7 +189,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     await connectDB();
   } catch {
-    // DB unavailable — some routes still work (admin email login, session check)
+    // Error already logged in connectDB; routes below return 503 when DB is unavailable
   }
 
   const url = req.url || '/';
