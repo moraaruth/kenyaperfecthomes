@@ -242,22 +242,19 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({
               />
             </div>
 
-            {(mode === 'signin' || mode === 'register') && (
+            {mode === 'signin' && (
               <div>
                 <label className={labelClass}>Password</label>
                 <input
                   type="password"
-                  required={mode === 'register'}
-                  autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
+                  autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className={inputClass}
                 />
-                {mode === 'signin' && (
-                  <p className="text-[11px] text-neutral-500 mt-1.5 leading-relaxed">
-                    Administrator emails on the approved list can leave this blank.
-                  </p>
-                )}
+                <p className="text-[11px] text-neutral-500 mt-1.5 leading-relaxed">
+                  Administrator emails on the approved list can leave this blank.
+                </p>
               </div>
             )}
 
