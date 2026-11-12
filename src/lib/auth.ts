@@ -30,11 +30,14 @@ export interface AuthenticatedRequest extends Request {
   adminUser?: AdminSession;
 }
 
-// Production requires ADMIN_SESSION_SECRET and fails closed without it.
-// Development generates a per-process secret, so sessions reset on restart.
+// The signing key is derived from MONGODB_URI, a server-only secret that is already
+// required. This keeps sessions valid across Vercel instances without a separate env var.
+// Without MONGODB_URI, production fails closed and development uses a per-process key.
 let devFallbackSecret: string | undefined;
 const getSecretKey = (): string | null => {
-  if (process.env.ADMIN_SESSION_SECRET) return process.env.ADMIN_SESSION_SECRET;
+  if (process.env.MONGODB_URI) {
+    return crypto.createHash('sha256').update(`ph-admin-session:${process.env.MONGODB_URI}`).digest('hex');
+  }
   if (process.env.NODE_ENV === 'production') return null;
   if (!devFallbackSecret) devFallbackSecret = crypto.randomBytes(32).toString('hex');
   return devFallbackSecret;
@@ -46,7 +49,7 @@ const getSecretKey = (): string | null => {
  */
 export function signSessionToken(payload: SessionPayload): string {
   const key = getSecretKey();
-  if (!key) throw new Error('ADMIN_SESSION_SECRET is not configured.');
+  if (!key) throw new Error('MONGODB_URI is not configured.');
 
   const session: AdminSession = {
     ...payload,

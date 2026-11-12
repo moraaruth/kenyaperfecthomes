@@ -137,8 +137,11 @@ const SESSION_COOKIE = 'ph_admin_session';
 const SESSION_MS = 7 * 24 * 60 * 60 * 1000;
 
 let _secret: string | undefined;
+// Derived from MONGODB_URI so every Vercel instance signs and verifies with the same key.
 const secret = (): string => {
-  if (process.env.ADMIN_SESSION_SECRET) return process.env.ADMIN_SESSION_SECRET;
+  if (process.env.MONGODB_URI) {
+    return crypto.createHash('sha256').update(`ph-admin-session:${process.env.MONGODB_URI}`).digest('hex');
+  }
   if (!_secret) _secret = crypto.randomBytes(32).toString('hex');
   return _secret;
 };

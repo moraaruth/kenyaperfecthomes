@@ -13,6 +13,7 @@ import { InquiryModel } from './src/models/Inquiry.ts';
 import { UserModel, USER_ROLES, USER_STATUSES } from './src/models/User.ts';
 import { normalizePropertyImages } from './src/lib/cloudinary.ts';
 import { getImageAssetRefs, destroyImageAssets } from './src/lib/propertyImageAssets.ts';
+import { isPasswordlessAdminEmail } from './src/lib/passwordlessAdmins.ts';
 import {
   normalizeEmail,
   createUserSessionToken,
