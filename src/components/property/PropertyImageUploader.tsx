@@ -40,40 +40,29 @@ export const PropertyImageUploader: React.FC<PropertyImageUploaderProps> = ({
   const [uploadQueue, setUploadQueue] = useState<UploadItem[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Ref holds the latest images array so concurrent uploads never read a stale closure
+  const imagesRef = useRef<PropertyImage[]>(images);
+  imagesRef.current = images;
 
-  // Re-sync parent images whenever changes occur
   const updateImagesList = (newImages: PropertyImage[]) => {
-    // Re-index sortOrder and ensure cover exists
-    const reindexed = newImages.map((img, idx) => ({
-      ...img,
-      sortOrder: idx,
-    }));
-    const hasCover = reindexed.some((img) => img.isCover);
-    if (!hasCover && reindexed.length > 0) {
-      reindexed[0].isCover = true;
-    }
+    const reindexed = newImages.map((img, idx) => ({ ...img, sortOrder: idx }));
+    if (!reindexed.some((img) => img.isCover) && reindexed.length > 0) reindexed[0].isCover = true;
     onChange(reindexed);
   };
 
-  // Upload a single file to server /api/upload
   const uploadSingleFile = async (item: UploadItem) => {
     if (!item.file) return;
 
     setUploadQueue((prev) =>
-      prev.map((i) =>
-        i.id === item.id ? { ...i, status: 'uploading', progress: 30 } : i
-      )
+      prev.map((i) => i.id === item.id ? { ...i, status: 'uploading', progress: 30 } : i)
     );
 
     const formData = new FormData();
     formData.append('image', item.file);
 
     try {
-      // Simulate progress stepping for immediate feedback
       setUploadQueue((prev) =>
-        prev.map((i) =>
-          i.id === item.id ? { ...i, status: 'processing', progress: 75 } : i
-        )
+        prev.map((i) => i.id === item.id ? { ...i, status: 'processing', progress: 75 } : i)
       );
 
       const token = typeof window !== 'undefined' ? localStorage.getItem('ph_admin_token') : null;
@@ -96,77 +85,70 @@ export const PropertyImageUploader: React.FC<PropertyImageUploaderProps> = ({
 
       setUploadQueue((prev) =>
         prev.map((i) =>
-          i.id === item.id
-            ? { ...i, status: 'done', progress: 100, imageMetadata: uploadedMetadata }
-            : i
+          i.id === item.id ? { ...i, status: 'done', progress: 100, imageMetadata: uploadedMetadata } : i
         )
       );
 
-      // Add to main images list
-      const updated = [...images, uploadedMetadata];
-      updateImagesList(updated);
+      // Use ref so concurrent uploads always append to the latest list, never a stale snapshot
+      updateImagesList([...imagesRef.current, uploadedMetadata]);
 
-      // Remove from queue after a short delay
       setTimeout(() => {
         setUploadQueue((prev) => prev.filter((i) => i.id !== item.id));
       }, 1200);
     } catch (err: any) {
-      console.error('Upload failed:', err);
       setUploadQueue((prev) =>
         prev.map((i) =>
           i.id === item.id
-            ? {
-                ...i,
-                status: 'failed',
-                errorMessage: err.message || 'Upload failed. Check format or connection.',
-              }
+            ? { ...i, status: 'failed', errorMessage: err.message || 'Upload failed. Check format or connection.' }
             : i
         )
       );
     }
   };
 
-  // Handle incoming files from input or drag
+  // Run up to 3 uploads concurrently; queue the rest
   const handleFiles = (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return;
 
-    const files = Array.from(fileList);
+    const remaining = maxFiles - images.length;
+    if (remaining <= 0) {
+      alert(`Maximum ${maxFiles} photos allowed.`);
+      return;
+    }
+
+    const files = Array.from(fileList).slice(0, remaining);
     const newItems: UploadItem[] = [];
 
     for (const file of files) {
-      // Check file size (e.g. 25MB)
       if (file.size > maxSizeMB * 1024 * 1024) {
-        alert(
-          `"${file.name}" is too large (${(file.size / (1024 * 1024)).toFixed(1)}MB). Max allowed size is ${maxSizeMB}MB.`
-        );
+        alert(`"${file.name}" is too large (${(file.size / (1024 * 1024)).toFixed(1)}MB). Max is ${maxSizeMB}MB.`);
         continue;
       }
-
-      // Create preview object URL
       let previewUrl = '';
-      try {
-        previewUrl = URL.createObjectURL(file);
-      } catch {
-        previewUrl = '';
-      }
-
-      const newItem: UploadItem = {
+      try { previewUrl = URL.createObjectURL(file); } catch { previewUrl = ''; }
+      newItems.push({
         id: `upload_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
         file,
         previewUrl,
         status: 'pending',
         progress: 0,
-      };
-
-      newItems.push(newItem);
+      });
     }
 
+    if (newItems.length === 0) return;
     setUploadQueue((prev) => [...prev, ...newItems]);
 
-    // Kick off uploads sequentially or concurrently
-    newItems.forEach((item) => {
-      uploadSingleFile(item);
-    });
+    // Upload in batches of 3 concurrently
+    const CONCURRENCY = 3;
+    const runBatch = async (batch: UploadItem[]) => {
+      await Promise.all(batch.map(uploadSingleFile));
+    };
+    const runAll = async () => {
+      for (let i = 0; i < newItems.length; i += CONCURRENCY) {
+        await runBatch(newItems.slice(i, i + CONCURRENCY));
+      }
+    };
+    runAll();
   };
 
   // Delete an image
