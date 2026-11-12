@@ -225,7 +225,7 @@ export const EditPropertyPage: React.FC<EditPropertyPageProps> = ({
           {/* Images */}
           <div className="space-y-3 pt-4 border-t border-neutral-200">
             <label className={labelCls}>Property Photos</label>
-            <PropertyImageUploader images={uploadedImages} onChange={setUploadedImages} maxFiles={30} maxSizeMB={25} />
+            <PropertyImageUploader images={uploadedImages} onChange={setUploadedImages} maxFiles={50} maxSizeMB={25} />
           </div>
 
           {/* Actions */}

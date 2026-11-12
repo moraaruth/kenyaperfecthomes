@@ -34,7 +34,7 @@ interface PropertyImageUploaderProps {
 export const PropertyImageUploader: React.FC<PropertyImageUploaderProps> = ({
   images,
   onChange,
-  maxFiles = 30,
+  maxFiles = 50,
   maxSizeMB = 25,
 }) => {
   const [uploadQueue, setUploadQueue] = useState<UploadItem[]>([]);

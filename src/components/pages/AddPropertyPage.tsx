@@ -493,7 +493,7 @@ export const AddPropertyPage: React.FC<AddPropertyPageProps> = ({
               <PropertyImageUploader
                 images={uploadedImages}
                 onChange={setUploadedImages}
-                maxFiles={30}
+                maxFiles={50}
                 maxSizeMB={25}
               />
 
