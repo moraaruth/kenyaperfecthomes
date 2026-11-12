@@ -16,12 +16,14 @@ import {
   Clock,
   Sparkles,
   CloudUpload,
-  UserCheck
+  UserCheck,
+  Pencil
 } from 'lucide-react';
 import { Property } from '../../types';
 import { AdminUser, logoutAdmin, isFullAdmin } from '../../lib/authClient';
 import { AdminUsersPanel } from './AdminUsersPanel';
 import { AddPropertyPage } from './AddPropertyPage';
+import { EditPropertyPage } from './EditPropertyPage';
 import { deleteProperty, updateProperty } from '../../lib/propertyStore';
 import { getCoverImageUrl, transformForThumbnail } from '../../lib/cloudinary';
 
@@ -72,9 +74,10 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
   onSignOut,
   onViewProperty,
 }) => {
-  const [activeTab, setActiveTab] = useState<'listings' | 'add' | 'bookings' | 'inquiries' | 'users' | 'security'>('listings');
+  const [activeTab, setActiveTab] = useState<'listings' | 'add' | 'edit' | 'bookings' | 'inquiries' | 'users' | 'security'>('listings');
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState('All');
+  const [editingProperty, setEditingProperty] = useState<Property | null>(null);
   
   // Bookings & Inquiries state
   const [bookings, setBookings] = useState<BookingRecord[]>([]);
@@ -160,6 +163,11 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
     } catch (err) {
       alert('Failed to delete property. Please verify your admin session.');
     }
+  };
+
+  const handleEdit = (property: Property) => {
+    setEditingProperty(property);
+    setActiveTab('edit');
   };
 
   const showNotice = (msg: string) => {
@@ -445,9 +453,17 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                           <button
                             onClick={() => onViewProperty(property)}
                             className="p-1.5 rounded-lg text-neutral-600 hover:bg-neutral-100 hover:text-brand-900 transition-colors"
-                            title="Preview listing in modal"
+                            title="Preview listing"
                           >
                             <ExternalLink className="w-4 h-4" />
+                          </button>
+
+                          <button
+                            onClick={() => handleEdit(property)}
+                            className="p-1.5 rounded-lg text-brand-700 hover:bg-brand-50 transition-colors"
+                            title="Edit listing"
+                          >
+                            <Pencil className="w-4 h-4" />
                           </button>
 
                           <button
@@ -488,6 +504,26 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                 setActiveTab('listings');
               }}
               onBrowseProperties={() => setActiveTab('listings')}
+            />
+          </div>
+        )}
+
+        {/* TAB: EDIT PROPERTY */}
+        {activeTab === 'edit' && editingProperty && (
+          <div className="max-w-4xl mx-auto">
+            <EditPropertyPage
+              property={editingProperty}
+              adminUser={adminUser}
+              onPropertyUpdated={(updated) => {
+                if (onPropertyUpdated) onPropertyUpdated(updated);
+                showNotice(`"${updated.title}" updated successfully.`);
+                setEditingProperty(null);
+                setActiveTab('listings');
+              }}
+              onCancel={() => {
+                setEditingProperty(null);
+                setActiveTab('listings');
+              }}
             />
           </div>
         )}
