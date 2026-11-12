@@ -1,4 +1,4 @@
-import express, { Request, Response } from 'express';
+import express, { NextFunction, Request, Response } from 'express';
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
 import path from 'path';
@@ -49,6 +49,16 @@ const isProduction = process.env.NODE_ENV === 'production';
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 app.use(cookieParser());
+
+// Serverless (Vercel) never runs startServer(), so connect lazily per request.
+app.use(async (_req: Request, _res: Response, next: NextFunction) => {
+  try {
+    await ensureDatabase();
+  } catch (err) {
+    console.error('[Database] Lazy connect failed:', err);
+  }
+  next();
+});
 
 // Security: strict admin allowlist verification active
 console.log(`[Security] Strict Admin Allowlist Active (${ADMIN_EMAILS.length} authorized accounts configured)`);
