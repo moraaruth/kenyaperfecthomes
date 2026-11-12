@@ -748,4 +748,9 @@ async function startServer() {
   });
 }
 
-startServer();
+export default app;
+
+// Vercel runs the exported app as a serverless function (see api/index.ts)
+if (!process.env.VERCEL) {
+  startServer();
+}
