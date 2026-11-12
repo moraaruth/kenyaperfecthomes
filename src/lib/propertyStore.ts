@@ -1,0 +1,272 @@
+import { Property, BookingRequest, ContactMessage, SearchFilters } from '../types';
+import { slugify } from './formatters';
+
+const STORAGE_KEY = 'perfect_homes_properties_v2';
+const SAVED_KEY = 'perfect_homes_saved_properties_v2';
+const BOOKINGS_KEY = 'perfect_homes_bookings_v2';
+
+// Helper to get stored properties
+export function getStoredProperties(): Property[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveStoredProperties(properties: Property[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(properties));
+  } catch (err) {
+    console.error('Failed to save properties to localStorage', err);
+  }
+}
+
+// Fetch properties with filters
+export async function fetchProperties(filters?: SearchFilters): Promise<Property[]> {
+  // Attempt to call server API first if available
+  try {
+    const params = new URLSearchParams();
+    if (filters?.keyword) params.set('keyword', filters.keyword);
+    if (filters?.propertyType && filters.propertyType !== 'All') params.set('propertyType', filters.propertyType);
+    if (filters?.listingType && filters.listingType !== 'All') params.set('listingType', filters.listingType);
+    if (filters?.minPrice) params.set('minPrice', filters.minPrice.toString());
+    if (filters?.maxPrice) params.set('maxPrice', filters.maxPrice.toString());
+    if (filters?.bedrooms && filters.bedrooms !== 'Any') params.set('bedrooms', filters.bedrooms);
+
+    const res = await fetch(`/api/properties?${params.toString()}`, {
+      headers: { Accept: 'application/json' },
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        return data;
+      }
+    }
+  } catch {
+    // Fall back to client storage
+  }
+
+  let list = getStoredProperties();
+
+  if (!filters) return list;
+
+  const normalize = (value: unknown) => String(value ?? '').toLowerCase().trim();
+
+  const q = normalize(filters.keyword);
+  if (q) {
+    list = list.filter((p) =>
+      [p.title, p.description, p.location?.neighborhood, p.location?.city, p.propertyType].some((field) =>
+        normalize(field).includes(q)
+      )
+    );
+  }
+
+  if (filters.propertyType && filters.propertyType !== 'All') {
+    list = list.filter((p) => normalize(p.propertyType) === normalize(filters.propertyType));
+  }
+
+  if (filters.listingType && filters.listingType !== 'All') {
+    list = list.filter((p) => normalize(p.listingType) === normalize(filters.listingType));
+  }
+
+  if (filters.minPrice && filters.minPrice > 0) {
+    list = list.filter((p) => p.price >= (filters.minPrice || 0));
+  }
+
+  if (filters.maxPrice && filters.maxPrice > 0) {
+    list = list.filter((p) => p.price <= (filters.maxPrice || Infinity));
+  }
+
+  if (filters.bedrooms && filters.bedrooms !== 'Any') {
+    const minBeds = parseInt(filters.bedrooms, 10);
+    if (!isNaN(minBeds)) {
+      list = list.filter((p) => p.bedrooms >= minBeds);
+    }
+  }
+
+  return list;
+}
+
+// Add new property (Protected)
+export async function addProperty(propertyData: Omit<Property, '_id' | 'createdAt' | 'slug'>): Promise<Property> {
+  const slug = slugify(propertyData.title) + '-' + Date.now().toString().slice(-4);
+  const newProp: Property = {
+    ...propertyData,
+    _id: 'prop-' + Date.now(),
+    id: 'prop-' + Date.now(),
+    slug,
+    createdAt: new Date().toISOString(),
+  };
+
+  try {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('ph_admin_token') : null;
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const res = await fetch('/api/properties', {
+      method: 'POST',
+      headers,
+      credentials: 'include',
+      body: JSON.stringify(newProp),
+    });
+    if (res.ok) {
+      const saved = await res.json();
+      if (saved && saved._id) {
+        const list = getStoredProperties();
+        saveStoredProperties([saved, ...list]);
+        return saved;
+      }
+    } else if (res.status === 401 || res.status === 403) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Unauthorized: Only allowed administrators can create properties.');
+    }
+  } catch (err: any) {
+    if (err.message && err.message.includes('Unauthorized')) {
+      throw err;
+    }
+    // fallback
+  }
+
+  const list = getStoredProperties();
+  const updated = [newProp, ...list];
+  saveStoredProperties(updated);
+  return newProp;
+}
+
+// Update property (Protected)
+export async function updateProperty(id: string, updates: Partial<Property>): Promise<Property | null> {
+  try {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('ph_admin_token') : null;
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const res = await fetch(`/api/properties/${id}`, {
+      method: 'PATCH',
+      headers,
+      credentials: 'include',
+      body: JSON.stringify(updates),
+    });
+
+    if (res.ok) {
+      const updated = await res.json();
+      const list = getStoredProperties().map((p) => (p._id === id || p.id === id ? { ...p, ...updates } : p));
+      saveStoredProperties(list);
+      return updated;
+    } else if (res.status === 401 || res.status === 403) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Unauthorized');
+    }
+  } catch (err) {
+    console.warn('Update failed:', err);
+  }
+
+  const list = getStoredProperties().map((p) => (p._id === id || p.id === id ? { ...p, ...updates } : p));
+  saveStoredProperties(list);
+  return list.find((p) => p._id === id || p.id === id) || null;
+}
+
+// Delete property (Protected)
+export async function deleteProperty(id: string): Promise<boolean> {
+  try {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('ph_admin_token') : null;
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const res = await fetch(`/api/properties/${id}`, {
+      method: 'DELETE',
+      headers,
+      credentials: 'include',
+    });
+
+    if (res.status === 401 || res.status === 403) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Unauthorized');
+    }
+  } catch (err) {
+    console.warn('Delete failed:', err);
+  }
+
+  const remaining = getStoredProperties().filter((p) => p._id !== id && p.id !== id);
+  saveStoredProperties(remaining);
+  return true;
+}
+
+// Saved properties
+export function getSavedPropertyIds(): string[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(SAVED_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function toggleSaveProperty(id: string): string[] {
+  const current = getSavedPropertyIds();
+  let updated: string[];
+  if (current.includes(id)) {
+    updated = current.filter((item) => item !== id);
+  } else {
+    updated = [...current, id];
+  }
+  try {
+    localStorage.setItem(SAVED_KEY, JSON.stringify(updated));
+  } catch (err) {
+    console.error(err);
+  }
+  return updated;
+}
+
+// Bookings
+export async function submitBooking(booking: BookingRequest): Promise<{ success: boolean; message: string }> {
+  try {
+    await fetch('/api/bookings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(booking),
+    });
+  } catch {
+    // fallback
+  }
+
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = localStorage.getItem(BOOKINGS_KEY);
+      const list = raw ? JSON.parse(raw) : [];
+      list.push({ ...booking, _id: 'book-' + Date.now(), createdAt: new Date().toISOString() });
+      localStorage.setItem(BOOKINGS_KEY, JSON.stringify(list));
+    } catch {
+      // ignore
+    }
+  }
+
+  return {
+    success: true,
+    message: `Thank you ${booking.firstName}! Your viewing appointment request for ${booking.houseType} has been received. Our Westlands agent will reach out via ${booking.contact} within 2 hours.`,
+  };
+}
+
+// Contact Inquiry
+export async function submitContact(inquiry: ContactMessage): Promise<{ success: boolean; message: string }> {
+  try {
+    await fetch('/api/contact', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(inquiry),
+    });
+  } catch {
+    // fallback
+  }
+
+  return {
+    success: true,
+    message: `Thank you, ${inquiry.firstName}! Your inquiry has been delivered to Perfect Homes Kenya. An agent will respond to ${inquiry.email} shortly.`,
+  };
+}

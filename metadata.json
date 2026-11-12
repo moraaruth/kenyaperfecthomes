@@ -1,0 +1,6 @@
+{
+  "name": "Perfect Homes Kenya",
+  "description": "Kenya's premier luxury real estate platform for buying, renting, and discovering verified residential and commercial properties in Nairobi and beyond.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
