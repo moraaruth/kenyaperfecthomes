@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Property, PropertyType, ListingType, PropertyImage } from '../../types';
 import { updateProperty } from '../../lib/propertyStore';
+import { toSquareFeet, toSquareMeters } from '../../lib/formatters';
 import { PropertyImageUploader } from '../property/PropertyImageUploader';
 import { CheckCircle2, MapPin, UserCheck, Save, ArrowLeft } from 'lucide-react';
 import { AdminUser } from '../../lib/authClient';
@@ -32,7 +33,7 @@ export const EditPropertyPage: React.FC<EditPropertyPageProps> = ({
   const [neighborhood, setNeighborhood] = useState(property.location?.neighborhood || 'Westlands');
   const [beds, setBeds] = useState(String(property.bedrooms));
   const [baths, setBaths] = useState(String(property.bathrooms));
-  const [squareFeet, setSquareFeet] = useState(String(property.squareFeet));
+  const [squareMeters, setSquareMeters] = useState(String(toSquareMeters(property.squareFeet)));
   const [selectedAmenities, setSelectedAmenities] = useState<string[]>(property.amenities || []);
   const [rateWeekly, setRateWeekly] = useState(String(property.rates?.weekly || ''));
   const [rateSale, setRateSale] = useState(String(property.rates?.sale || ''));
@@ -82,7 +83,7 @@ export const EditPropertyPage: React.FC<EditPropertyPageProps> = ({
       location: { street: street || undefined, city, neighborhood, county: 'Nairobi' },
       bedrooms: Number(beds) || 1,
       bathrooms: Number(baths) || 1,
-      squareFeet: Number(squareFeet) || 500,
+      squareFeet: Number(squareMeters) ? toSquareFeet(Number(squareMeters)) : 500,
       images: uploadedImages,
       amenities: selectedAmenities,
       seller: { name: sellerName, email: sellerEmail, phone: sellerPhone },
@@ -171,9 +172,9 @@ export const EditPropertyPage: React.FC<EditPropertyPageProps> = ({
             </div>
           </div>
 
-          {/* Beds / Baths / sqft */}
+          {/* Beds / Baths / m² */}
           <div className="grid grid-cols-3 gap-4">
-            {[['Beds', beds, setBeds], ['Baths', baths, setBaths], ['Square Feet', squareFeet, setSquareFeet]].map(([lbl, val, setter]) => (
+            {[['Beds', beds, setBeds], ['Baths', baths, setBaths], ['Square Meters (m²)', squareMeters, setSquareMeters]].map(([lbl, val, setter]) => (
               <div key={lbl as string}>
                 <label className={labelCls}>{lbl as string}</label>
                 <input type="number" min="0" value={val as string} onChange={(e) => (setter as any)(e.target.value)} className={inputCls} />

@@ -239,6 +239,7 @@ export default function App() {
       {/* Global Property Detail Modal */}
       {selectedProperty && (
         <PropertyDetailModal
+          key={selectedProperty._id || selectedProperty.id}
           property={selectedProperty}
           isSaved={savedIds.includes(selectedProperty._id || selectedProperty.id || '')}
           onToggleSave={handleToggleSave}

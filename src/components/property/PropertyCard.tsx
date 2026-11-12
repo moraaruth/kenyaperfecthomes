@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Bed, Bath, Square, MapPin, Heart, ArrowUpRight, MessageCircle } from 'lucide-react';
 import { Property } from '../../types';
-import { formatKSh, formatArea, generateWhatsAppLink } from '../../lib/formatters';
+import { formatKSh, formatArea, generateWhatsAppLink, toSquareMeters } from '../../lib/formatters';
 import { getCoverImageUrl, transformForCard } from '../../lib/cloudinary';
 
 interface PropertyCardProps {
@@ -87,7 +87,7 @@ export const PropertyCard: React.FC<PropertyCardProps> = ({
             {property.title}
           </h3>
 
-          {/* Key Specs Row (Screenshot #3 & #8: Beds, Baths, sqft) */}
+          {/* Key Specs Row (Screenshot #3 & #8: Beds, Baths, m²) */}
           <div className="flex items-center gap-4 text-xs text-neutral-600 my-3.5 py-2.5 border-y border-neutral-100">
             <div className="flex items-center gap-1.5">
               <Bed className="w-4 h-4 text-neutral-400" />
@@ -103,8 +103,8 @@ export const PropertyCard: React.FC<PropertyCardProps> = ({
 
             <div className="flex items-center gap-1.5">
               <Square className="w-3.5 h-3.5 text-neutral-400" />
-              <span className="font-semibold text-neutral-800">{property.squareFeet}</span>
-              <span>sq ft</span>
+              <span className="font-semibold text-neutral-800">{toSquareMeters(property.squareFeet).toLocaleString()}</span>
+              <span>m²</span>
             </div>
           </div>
         </div>

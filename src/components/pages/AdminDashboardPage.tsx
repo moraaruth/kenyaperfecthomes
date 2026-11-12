@@ -26,6 +26,7 @@ import { AddPropertyPage } from './AddPropertyPage';
 import { EditPropertyPage } from './EditPropertyPage';
 import { deleteProperty, updateProperty } from '../../lib/propertyStore';
 import { getCoverImageUrl, transformForThumbnail } from '../../lib/cloudinary';
+import { toSquareMeters } from '../../lib/formatters';
 
 interface AdminDashboardPageProps {
   adminUser: AdminUser;
@@ -428,7 +429,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                           <strong className="block text-neutral-900 text-xs">{property.bathrooms}</strong> Baths
                         </div>
                         <div>
-                          <strong className="block text-neutral-900 text-xs">{property.squareFeet}</strong> sqft
+                          <strong className="block text-neutral-900 text-xs">{toSquareMeters(property.squareFeet).toLocaleString()}</strong> m²
                         </div>
                       </div>
 

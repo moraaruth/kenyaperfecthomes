@@ -25,9 +25,20 @@ export function formatKSh(amount: number, compact: boolean = false): string {
     .replace('KES', 'KSh');
 }
 
+const SQFT_PER_SQM = 10.764;
+
+export function toSquareMeters(sqft: number): number {
+  return Math.round(sqft / SQFT_PER_SQM);
+}
+
+export function toSquareFeet(sqm: number): number {
+  return Math.round(sqm * SQFT_PER_SQM);
+}
+
+// Areas are stored in square feet; display converts to square metres.
 export function formatArea(sqft: number): string {
-  if (!sqft) return '0 sq ft';
-  return `${sqft.toLocaleString()} sq ft`;
+  if (!sqft) return '0 m²';
+  return `${toSquareMeters(sqft).toLocaleString()} m²`;
 }
 
 export function formatPhone(phone: string): string {

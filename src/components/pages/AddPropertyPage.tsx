@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Property, PropertyType, ListingType, PropertyImage } from '../../types';
 import { addProperty } from '../../lib/propertyStore';
+import { toSquareFeet } from '../../lib/formatters';
 import { PropertyImageUploader } from '../property/PropertyImageUploader';
 import { PlusCircle, CheckCircle2, MapPin, UserCheck, Sparkles } from 'lucide-react';
 
@@ -25,7 +26,7 @@ export const AddPropertyPage: React.FC<AddPropertyPageProps> = ({
   const [neighborhood, setNeighborhood] = useState('Westlands');
   const [beds, setBeds] = useState('2');
   const [baths, setBaths] = useState('2');
-  const [squareFeet, setSquareFeet] = useState('1100');
+  const [squareMeters, setSquareMeters] = useState('102');
 
   // Amenities from Screenshot #12
   const availableAmenities = [
@@ -156,7 +157,7 @@ export const AddPropertyPage: React.FC<AddPropertyPageProps> = ({
         },
         bedrooms: Number(beds) || 1,
         bathrooms: Number(baths) || 1,
-        squareFeet: Number(squareFeet) || 500,
+        squareFeet: Number(squareMeters) ? toSquareFeet(Number(squareMeters)) : 500,
         images: uploadedImages,
         amenities: selectedAmenities,
         featured: false,
@@ -311,7 +312,7 @@ export const AddPropertyPage: React.FC<AddPropertyPageProps> = ({
               </div>
             </div>
 
-            {/* Beds, Baths, Square Feet (Screenshot #11) */}
+            {/* Beds, Baths, Square Meters (Screenshot #11) */}
             <div className="grid grid-cols-3 gap-4">
               <div>
                 <label className="block text-xs font-bold text-neutral-800 uppercase tracking-wider mb-2">
@@ -341,13 +342,13 @@ export const AddPropertyPage: React.FC<AddPropertyPageProps> = ({
 
               <div>
                 <label className="block text-xs font-bold text-neutral-800 uppercase tracking-wider mb-2">
-                  Square Feet
+                  Square Meters (m²)
                 </label>
                 <input
                   type="number"
                   min="0"
-                  value={squareFeet}
-                  onChange={(e) => setSquareFeet(e.target.value)}
+                  value={squareMeters}
+                  onChange={(e) => setSquareMeters(e.target.value)}
                   className="w-full px-4 py-3 rounded-xl border border-neutral-200 bg-neutral-50/60 text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-700"
                 />
               </div>
