@@ -29,7 +29,7 @@ export const PropertyCard: React.FC<PropertyCardProps> = ({
   return (
     <div className="group bg-white rounded-2xl border border-neutral-200/90 shadow-xs hover:shadow-xl transition-all duration-300 flex flex-col overflow-hidden text-left relative">
       {/* IMAGE CONTAINER WITH 4:3 RATIO */}
-      <div className="relative aspect-4/3 w-full bg-neutral-100 overflow-hidden cursor-pointer" onClick={() => onSelectProperty(property)}>
+      <div className="relative aspect-[4/3] w-full bg-neutral-100 overflow-hidden cursor-pointer" onClick={() => onSelectProperty(property)}>
         {!imgError ? (
           <img
             src={primaryImage}

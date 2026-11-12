@@ -93,7 +93,7 @@ export const PropertyDetailModal: React.FC<PropertyDetailModalProps> = ({
           <div className="space-y-3">
             {/* Main image with arrows */}
             <div
-              className="aspect-16/10 sm:aspect-16/9 rounded-xl overflow-hidden bg-neutral-100 relative shadow-inner select-none"
+              className="aspect-[16/10] sm:aspect-[16/9] rounded-xl overflow-hidden bg-neutral-100 relative shadow-inner select-none"
               onTouchStart={handleTouchStart}
               onTouchEnd={handleTouchEnd}
             >

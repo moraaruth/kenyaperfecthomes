@@ -385,7 +385,7 @@ export const PropertyImageUploader: React.FC<PropertyImageUploaderProps> = ({
                   onDragStart={(e) => handleDragStart(e, idx)}
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={(e) => handleDrop(e, idx)}
-                  className={`group relative rounded-xl overflow-hidden aspect-4/3 bg-neutral-100 border-2 transition-all shadow-xs ${
+                  className={`group relative rounded-xl overflow-hidden aspect-[4/3] bg-neutral-100 border-2 transition-all shadow-xs ${
                     isCover
                       ? 'border-brand-700 ring-2 ring-brand-300'
                       : 'border-neutral-200 hover:border-neutral-400'
