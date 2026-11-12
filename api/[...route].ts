@@ -20,13 +20,9 @@ let _conn: Promise<typeof mongoose> | null = null;
 async function connectDB() {
   if (mongoose.connection.readyState === 1) return;
   const uri = process.env.MONGODB_URI;
-  if (!uri) {
-    console.error('[MongoDB] MONGODB_URI is not set in this environment. Add it in Vercel Project Settings > Environment Variables.');
-    return;
-  }
+  if (!uri) return;
   if (!_conn) {
     _conn = mongoose.connect(uri, { bufferCommands: false, serverSelectionTimeoutMS: 8000 }).catch((e) => {
-      console.error('[MongoDB] Connection failed:', e?.name, e?.message);
       _conn = null;
       throw e;
     });
@@ -250,7 +246,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(201).json({ success: true, user: sanitizeUser(user), token });
     } catch (e: any) {
       if (e?.code === 11000) return res.status(409).json({ error: 'An account with this email already exists.' });
-      console.error('Register error:', e?.message);
+      console.error('Register error:', e?.code);
       return res.status(500).json({ error: 'Registration failed. Please try again.' });
     }
   }
@@ -322,8 +318,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       else if (sort === 'price-desc') exec = exec.sort({ price: -1 });
       else exec = exec.sort({ featured: -1, createdAt: -1 });
       return res.status(200).json(await exec.lean());
-    } catch (e: any) {
-      console.error('Properties error:', e?.message);
+    } catch {
       return res.status(500).json({ error: 'Failed to retrieve properties.' });
     }
   }
@@ -350,10 +345,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const created = await Property.create({ ...req.body, slug, price: Number(price) });
       return res.status(201).json(created);
     } catch (e: any) {
-      console.error('[Properties] Create failed:', e?.name, e?.message);
       const isValidation = e?.name === 'ValidationError';
       return res.status(isValidation ? 400 : 500).json({
-        error: `Failed to create property: ${e?.message || 'unknown error'}`,
+        error: isValidation ? `Validation error: ${e.message}` : 'Failed to create property.',
       });
     }
   }
@@ -532,10 +526,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           sortOrder: 0,
           isCover: false,
         });
-      } catch (e: any) {
-        console.error('Cloudinary upload error:', e?.message, e?.http_code);
+      } catch {
         return res.status(502).json({
-          error: e?.message || 'Image upload to Cloudinary failed. Please try again.',
+          error: 'Image upload to Cloudinary failed. Please try again.',
         });
       }
     }
@@ -571,8 +564,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const { v2: cloudinary } = await import('cloudinary');
         cloudinary.config({ cloud_name: process.env.CLOUDINARY_CLOUD_NAME, api_key: process.env.CLOUDINARY_API_KEY, api_secret: process.env.CLOUDINARY_API_SECRET, secure: true });
         await cloudinary.uploader.destroy(publicId);
-      } catch (e: any) {
-        console.error('Cloudinary delete error:', e?.message);
+      } catch {
+        // Cloudinary delete is best-effort
       }
     }
     return res.status(200).json({ success: true, publicId });

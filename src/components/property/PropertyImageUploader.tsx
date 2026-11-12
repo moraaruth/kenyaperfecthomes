@@ -37,7 +37,6 @@ function resolveImageSrc(secureUrl: string | undefined): string {
     return secureUrl;
   }
   // Bare filename or relative path — not resolvable safely
-  console.warn('[PropertyImageUploader] Unresolvable image src, using fallback:', secureUrl);
   return FALLBACK;
 }
 
@@ -217,7 +216,7 @@ export const PropertyImageUploader: React.FC<PropertyImageUploaderProps> = ({
           headers,
           credentials: 'include',
         });
-      } catch (err) {
+      } catch {
         console.warn('Failed to delete asset from Cloudinary:', err);
       }
     }

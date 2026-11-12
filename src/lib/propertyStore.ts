@@ -22,7 +22,7 @@ export function saveStoredProperties(properties: Property[]): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(properties));
   } catch (err) {
-    console.error('Failed to save properties to localStorage', err);
+    // localStorage write failure is non-critical
   }
 }
 
@@ -119,7 +119,6 @@ export async function addProperty(propertyData: Omit<Property, '_id' | 'createdA
       return await res.json();
     }
     const errBody = await res.json().catch(() => ({}));
-    console.error('addProperty API error:', res.status, errBody);
     throw new Error(errBody.error || `Failed to create property (HTTP ${res.status})`);
   } catch (err: any) {
     throw err instanceof Error ? err : new Error('Failed to create property');
@@ -150,7 +149,7 @@ export async function updateProperty(id: string, updates: Partial<Property>): Pr
       throw new Error(err.error || 'Unauthorized');
     }
   } catch (err) {
-    console.warn('Update failed:', err);
+    // update failure is surfaced to the caller via return null
   }
 
   const list = getStoredProperties().map((p) => (p._id === id || p.id === id ? { ...p, ...updates } : p));
@@ -176,7 +175,7 @@ export async function deleteProperty(id: string): Promise<boolean> {
       throw new Error(err.error || 'Unauthorized');
     }
   } catch (err) {
-    console.warn('Delete failed:', err);
+    // delete failure is non-critical; local state is already updated
   }
 
   const remaining = getStoredProperties().filter((p) => p._id !== id && p.id !== id);
@@ -205,8 +204,8 @@ export function toggleSaveProperty(id: string): string[] {
   }
   try {
     localStorage.setItem(SAVED_KEY, JSON.stringify(updated));
-  } catch (err) {
-    console.error(err);
+  } catch {
+    // localStorage write failure is non-critical
   }
   return updated;
 }

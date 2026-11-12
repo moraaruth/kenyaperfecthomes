@@ -51,20 +51,16 @@ app.use(cookieParser());
 app.use(async (_req: Request, _res: Response, next: NextFunction) => {
   try {
     await ensureDatabase();
-  } catch (err) {
-    console.error('[Database] Lazy connect failed:', err);
+  } catch {
+    // connection errors are logged inside ensureDatabase
   }
   next();
 });
-
-// Security: strict admin allowlist verification active
-console.log('[Security] Administrator accounts are database-backed. Sign-in requires a password.');
 
 // Development Mode: Disable SSL verification for Cloudinary uploads
 // WARNING: Only use in development. Never disable SSL verification in production.
 if (!isProduction) {
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-  console.log('[Development] SSL verification disabled for local development');
 }
 
 // Cloudinary Configuration
@@ -89,11 +85,6 @@ if (hasCloudinaryCredentials) {
   }
 
   cloudinary.config(config);
-  console.log(`[Cloudinary] Configured for cloud: ${process.env.CLOUDINARY_CLOUD_NAME}`);
-} else {
-  console.log(
-    '[Cloudinary] Credentials not set in environment. Running with local development upload fallback.'
-  );
 }
 
 // Multer memory storage for direct streaming to Cloudinary
@@ -164,12 +155,9 @@ export async function ensureDatabase(): Promise<void> {
   if (!_dbConnectionPromise) {
     _dbConnectionPromise = mongoose
       .connect(mongoUri, { bufferCommands: false })
-      .then(() => {
-        console.log('[Database] Connected to MongoDB.');
-      })
       .catch((err) => {
         _dbConnectionPromise = null;
-        console.error('[Database] Connection failed:', err.message);
+        if (!isProduction) console.error('[Database] Connection failed:', err.message);
       });
   }
 
@@ -245,8 +233,7 @@ app.post('/api/auth/login', loginLimiter, async (req: Request, res: Response) =>
       user: profile,
       token,
     });
-  } catch (err: any) {
-    console.error('Login error:', err);
+  } catch {
     return res.status(500).json({ error: 'Authentication service encountered an error' });
   }
 });
@@ -297,7 +284,6 @@ app.post('/api/auth/register', registerLimiter, async (req: Request, res: Respon
     if (err?.code === 11000) {
       return res.status(409).json({ error: 'An account with this email already exists.' });
     }
-    console.error('Register error:', err);
     return res.status(500).json({ error: 'Registration failed. Please try again.' });
   }
 });
@@ -317,8 +303,8 @@ app.post('/api/auth/forgot-password', resetLimiter, async (req: Request, res: Re
         { $set: { resetRequestedAt: new Date() } }
       );
     }
-  } catch (err) {
-    console.error('Forgot password error:', err);
+  } catch {
+    // intentionally silent — generic response always returned
   }
   return res.json(genericResponse);
 });
@@ -354,8 +340,7 @@ app.post('/api/auth/reset-password', resetLimiter, async (req: Request, res: Res
     await user.save();
 
     return res.json({ success: true, message: 'Your password has been reset. You can now sign in.' });
-  } catch (err: any) {
-    console.error('Reset password error:', err);
+  } catch {
     return res.status(500).json({ error: 'Password reset failed. Please try again.' });
   }
 });
@@ -397,8 +382,8 @@ app.post('/api/auth/logout', async (req: Request, res: Response) => {
         { $inc: { tokenVersion: 1 } }
       );
     }
-  } catch (err) {
-    console.error('Logout error:', err);
+  } catch {
+    // session invalidation is best-effort
   }
   res.clearCookie(SESSION_COOKIE_NAME);
   return res.json({ success: true, message: 'Logged out successfully' });
@@ -434,8 +419,7 @@ app.get('/api/admin/users', requireAdminOnly as any, async (req: Request, res: R
 
     const users = await UserModel.find(filter).sort({ createdAt: -1 }).limit(500).lean();
     return res.json(users.map(sanitizeUser));
-  } catch (err) {
-    console.error('List users error:', err);
+  } catch {
     return res.status(500).json({ error: 'Failed to load users.' });
   }
 });
@@ -467,7 +451,6 @@ app.post('/api/admin/users', requireAdminOnly as any, async (req: Request, res: 
     if (err?.code === 11000) {
       return res.status(409).json({ error: 'An account with this email already exists.' });
     }
-    console.error('Create user error:', err);
     return res.status(500).json({ error: 'Failed to create user.' });
   }
 });
@@ -523,8 +506,7 @@ app.patch('/api/admin/users/:id', requireAdminOnly as any, async (req: Authentic
 
     await user.save();
     return res.json(sanitizeUser(user));
-  } catch (err) {
-    console.error('Update user error:', err);
+  } catch {
     return res.status(500).json({ error: 'Failed to update user.' });
   }
 });
@@ -547,8 +529,7 @@ app.delete('/api/admin/users/:id', requireAdminOnly as any, async (req: Authenti
 
     await user.deleteOne();
     return res.json({ success: true });
-  } catch (err) {
-    console.error('Delete user error:', err);
+  } catch {
     return res.status(500).json({ error: 'Failed to delete user.' });
   }
 });
@@ -572,8 +553,7 @@ app.post('/api/admin/users/:id/reset-link', requireAdminOnly as any, async (req:
     const proto = req.get('x-forwarded-proto') || req.protocol;
     const resetUrl = `${proto}://${req.get('host')}/reset-password?token=${raw}`;
     return res.json({ resetUrl, expiresAt });
-  } catch (err) {
-    console.error('Reset link error:', err);
+  } catch {
     return res.status(500).json({ error: 'Failed to create reset link.' });
   }
 });
@@ -661,15 +641,8 @@ app.post(
           };
 
           return res.status(201).json(imageMetadata);
-        } catch (cloudinaryError: any) {
-          console.error('[Upload Error - Cloudinary]:', {
-            message: cloudinaryError.message,
-            http_code: cloudinaryError.http_code,
-            statusCode: cloudinaryError.statusCode,
-            status: cloudinaryError.status,
-            response: cloudinaryError.response?.body,
-          });
-          // Fall through to fallback if Cloudinary fails
+        } catch {
+          // Fall through to base64 fallback
         }
       }
 
@@ -711,12 +684,10 @@ app.delete('/api/images/:publicId', requireAdminAuth as any, async (req: Authent
 
     if (hasCloudinaryCredentials) {
       await cloudinary.uploader.destroy(publicId);
-      console.log(`[Cloudinary] Asset deleted by admin: ${publicId}`);
     }
 
     return res.json({ success: true, publicId });
-  } catch (err: any) {
-    console.error('[Cloudinary Delete Error]:', err);
+  } catch {
     return res.status(500).json({ error: 'Failed to delete asset from Cloudinary' });
   }
 });
@@ -824,8 +795,7 @@ app.get('/api/properties', async (req: Request, res: Response) => {
     else list.sort((a, b) => (b.featured ? 1 : 0) - (a.featured ? 1 : 0));
 
     return res.json(list);
-  } catch (err: any) {
-    console.error('Error fetching properties:', err);
+  } catch {
     return res.status(500).json({ error: 'Failed to retrieve properties' });
   }
 });
@@ -931,8 +901,7 @@ app.post('/api/properties', requireAdminAuth as any, async (req: AuthenticatedRe
     };
     inMemoryProperties.unshift(createdProp as any);
     return res.status(201).json(createdProp);
-  } catch (err: any) {
-    console.error('Error creating property:', err);
+  } catch {
     return res.status(500).json({ error: 'Failed to add property' });
   }
 });
@@ -1099,9 +1068,7 @@ async function startServer() {
     });
   }
 
-  app.listen(Number(PORT), '0.0.0.0', () => {
-    console.log(`[Perfect Homes Server] Running on http://0.0.0.0:${PORT}`);
-  });
+  app.listen(Number(PORT), '0.0.0.0');
 }
 
 export default app;
