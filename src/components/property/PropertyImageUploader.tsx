@@ -22,8 +22,10 @@ import {
  *  3. A valid absolute path (/images/foo.jpg)    → use as-is
  *  4. A bare filename or relative path           → treat as broken, return fallback
  */
+const FALLBACK_IMAGE_SRC = '/images/property_westlands_apartment_1794311302942.jpg';
+
 function resolveImageSrc(secureUrl: string | undefined): string {
-  const FALLBACK = '/images/property_westlands_apartment_1794311302942.jpg';
+  const FALLBACK = FALLBACK_IMAGE_SRC;
   if (!secureUrl) return FALLBACK;
   if (
     secureUrl.startsWith('http://') ||
@@ -64,8 +66,10 @@ export const PropertyImageUploader: React.FC<PropertyImageUploaderProps> = ({
 }) => {
   const [uploadQueue, setUploadQueue] = useState<UploadItem[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
+  // Image srcs that failed to load; those slots render the fallback via state, not DOM mutation
+  const [failedSrcs, setFailedSrcs] = useState<Record<string, boolean>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
-  // Ref holds the latest images array so concurrent uploads never read a stale closure
+  // Latest images list. Updated synchronously on every commit so concurrent uploads build on each other
   const imagesRef = useRef<PropertyImage[]>(images);
   imagesRef.current = images;
   // Track object URLs we created so we can revoke them on cleanup
@@ -81,6 +85,7 @@ export const PropertyImageUploader: React.FC<PropertyImageUploaderProps> = ({
   const updateImagesList = (newImages: PropertyImage[]) => {
     const reindexed = newImages.map((img, idx) => ({ ...img, sortOrder: idx }));
     if (!reindexed.some((img) => img.isCover) && reindexed.length > 0) reindexed[0].isCover = true;
+    imagesRef.current = reindexed;
     onChange(reindexed);
   };
 
@@ -418,9 +423,11 @@ export const PropertyImageUploader: React.FC<PropertyImageUploaderProps> = ({
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 sm:gap-4">
             {images.map((img, idx) => {
               const isCover = Boolean(img.isCover || idx === 0);
+              const resolvedSrc = resolveImageSrc(img.secureUrl);
+              const displaySrc = failedSrcs[resolvedSrc] ? FALLBACK_IMAGE_SRC : resolvedSrc;
               return (
                 <div
-                  key={img.publicId || idx}
+                  key={`${img.publicId || 'no-id'}|${img.secureUrl || ''}`}
                   draggable
                   onDragStart={(e) => handleDragStart(e, idx)}
                   onDragOver={(e) => e.preventDefault()}
@@ -432,14 +439,12 @@ export const PropertyImageUploader: React.FC<PropertyImageUploaderProps> = ({
                   }`}
                 >
                   <img
-                    src={resolveImageSrc(img.secureUrl)}
+                    src={displaySrc}
                     alt={img.originalFilename || `Photo ${idx + 1}`}
                     className="w-full h-full object-cover"
-                    onError={(e) => {
-                      const el = e.currentTarget;
-                      const fallback = '/images/property_westlands_apartment_1794311302942.jpg';
-                      if (el.src !== window.location.origin + fallback) {
-                        el.src = fallback;
+                    onError={() => {
+                      if (!failedSrcs[resolvedSrc]) {
+                        setFailedSrcs((prev) => ({ ...prev, [resolvedSrc]: true }));
                       }
                     }}
                   />

@@ -94,16 +94,18 @@ export const AddPropertyPage: React.FC<AddPropertyPageProps> = ({
   ];
 
   const handleAddPreset = (preset: { label: string; url: string }) => {
-    const newImage: PropertyImage = {
-      publicId: `preset_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      secureUrl: preset.url,
-      format: 'jpg',
-      resourceType: 'image',
-      sortOrder: uploadedImages.length,
-      isCover: uploadedImages.length === 0,
-      originalFilename: preset.label,
-    };
-    setUploadedImages([...uploadedImages, newImage]);
+    setUploadedImages((prev) => [
+      ...prev,
+      {
+        publicId: `preset_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        secureUrl: preset.url,
+        format: 'jpg',
+        resourceType: 'image',
+        sortOrder: prev.length,
+        isCover: prev.length === 0,
+        originalFilename: preset.label,
+      },
+    ]);
   };
 
   const [isSubmitting, setIsSubmitting] = useState(false);
