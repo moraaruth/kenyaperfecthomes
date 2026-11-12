@@ -144,25 +144,45 @@ let inMemoryBookings: any[] = [];
 let inMemoryInquiries: any[] = [];
 let isMongoConnected = false;
 
-// Connect to MongoDB if MONGODB_URI is provided
-async function initDatabase() {
-  const mongoUri = process.env.MONGODB_URI;
-  if (!mongoUri) {
-    console.log('[Database] MONGODB_URI not set. Running with built-in high-performance storage.');
+// Cached connection promise — reused across serverless invocations in the same container
+let _dbConnectionPromise: Promise<void> | null = null;
+
+export async function ensureDatabase(): Promise<void> {
+  // Already connected
+  if (mongoose.connection.readyState === 1) {
+    isMongoConnected = true;
     return;
   }
 
-  try {
-    await mongoose.connect(mongoUri);
-    isMongoConnected = true;
-    console.log('[Database] Successfully connected to MongoDB cluster.');
-  } catch (err) {
-    console.warn('[Database] MongoDB connection failed, falling back to local storage:', err);
+  const mongoUri = process.env.MONGODB_URI;
+  if (!mongoUri) {
+    console.log('[Database] MONGODB_URI not set. Running with in-memory storage.');
     isMongoConnected = false;
+    return;
   }
+
+  // Reuse in-flight connection attempt
+  if (!_dbConnectionPromise) {
+    _dbConnectionPromise = mongoose
+      .connect(mongoUri, { bufferCommands: false })
+      .then(() => {
+        isMongoConnected = true;
+        console.log('[Database] Connected to MongoDB.');
+      })
+      .catch((err) => {
+        _dbConnectionPromise = null;
+        isMongoConnected = false;
+        console.error('[Database] Connection failed:', err.message);
+      });
+  }
+
+  await _dbConnectionPromise;
 }
 
-initDatabase();
+// Non-serverless startup: connect immediately
+if (!process.env.VERCEL) {
+  ensureDatabase();
+}
 
 // ==========================================
 // AUTHENTICATION & AUTHORIZATION ENDPOINTS
@@ -1099,7 +1119,7 @@ async function startServer() {
 
 export default app;
 
-// Vercel runs the exported app as a serverless function (see api/index.ts)
+// Vercel runs the exported app as a serverless function (see api/[...route].ts)
 if (!process.env.VERCEL) {
   startServer();
 }

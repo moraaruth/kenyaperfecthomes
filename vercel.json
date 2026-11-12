@@ -1,7 +1,13 @@
 {
   "buildCommand": "vite build",
   "outputDirectory": "dist",
+  "functions": {
+    "api/[...route].ts": {
+      "includeFiles": "src/**"
+    }
+  },
   "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/[...route]" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }
