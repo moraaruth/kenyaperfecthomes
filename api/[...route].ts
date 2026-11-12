@@ -377,5 +377,147 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({ success: true, message: 'If an account exists, a reset request has been recorded.' });
   }
 
+  // ── POST /api/upload ─────────────────────────────────────────────────────
+  if (path === '/api/upload' && method === 'POST') {
+    const session = await resolveSession(getToken(req));
+    if (!session || (session.role !== 'admin' && session.role !== 'agent')) {
+      return res.status(401).json({ error: 'Authentication required.' });
+    }
+
+    // Parse multipart/form-data using the Web Streams API available in Vercel Node runtime
+    const contentType = req.headers['content-type'] || '';
+    if (!contentType.includes('multipart/form-data')) {
+      return res.status(400).json({ error: 'Expected multipart/form-data.' });
+    }
+
+    // Extract boundary
+    const boundaryMatch = contentType.match(/boundary=([^;]+)/);
+    if (!boundaryMatch) return res.status(400).json({ error: 'Missing multipart boundary.' });
+    const boundary = boundaryMatch[1].trim();
+
+    // Read raw body
+    const chunks: Buffer[] = [];
+    await new Promise<void>((resolve, reject) => {
+      (req as any).on('data', (c: Buffer) => chunks.push(c));
+      (req as any).on('end', resolve);
+      (req as any).on('error', reject);
+    });
+    const raw = Buffer.concat(chunks);
+
+    // Parse the single 'image' part
+    const sep = Buffer.from(`--${boundary}`);
+    const parts: Buffer[] = [];
+    let start = 0;
+    while (start < raw.length) {
+      const idx = raw.indexOf(sep, start);
+      if (idx === -1) break;
+      const end = raw.indexOf(sep, idx + sep.length);
+      parts.push(raw.slice(idx + sep.length, end === -1 ? raw.length : end));
+      start = idx + sep.length;
+    }
+
+    let fileBuffer: Buffer | null = null;
+    let originalFilename = 'upload.jpg';
+    let mimetype = 'image/jpeg';
+
+    for (const part of parts) {
+      const headerEnd = part.indexOf('\r\n\r\n');
+      if (headerEnd === -1) continue;
+      const headers = part.slice(0, headerEnd).toString();
+      if (!headers.includes('name="image"')) continue;
+      const nameMatch = headers.match(/filename="([^"]+)"/);
+      if (nameMatch) originalFilename = nameMatch[1];
+      const ctMatch = headers.match(/Content-Type:\s*([^\r\n]+)/);
+      if (ctMatch) mimetype = ctMatch[1].trim();
+      // Skip \r\n\r\n header separator and trailing \r\n
+      fileBuffer = part.slice(headerEnd + 4, part.length - 2);
+      break;
+    }
+
+    if (!fileBuffer || fileBuffer.length === 0) {
+      return res.status(400).json({ error: 'No image file found in request.' });
+    }
+
+    // Try Cloudinary if credentials are set
+    const hasCloudinary = Boolean(
+      process.env.CLOUDINARY_CLOUD_NAME &&
+      process.env.CLOUDINARY_API_KEY &&
+      process.env.CLOUDINARY_API_SECRET
+    );
+
+    if (hasCloudinary) {
+      try {
+        const { v2: cloudinary } = await import('cloudinary');
+        cloudinary.config({
+          cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+          api_key: process.env.CLOUDINARY_API_KEY,
+          api_secret: process.env.CLOUDINARY_API_SECRET,
+          secure: true,
+        });
+
+        const result: any = await new Promise((resolve, reject) => {
+          const stream = cloudinary.uploader.upload_stream(
+            { folder: 'perfect_homes/properties', resource_type: 'image', format: 'auto', quality: 'auto' },
+            (err, r) => err ? reject(err) : resolve(r)
+          );
+          stream.end(fileBuffer!);
+        });
+
+        return res.status(201).json({
+          publicId: result.public_id,
+          secureUrl: result.secure_url,
+          format: result.format || 'jpg',
+          resourceType: result.resource_type || 'image',
+          width: result.width,
+          height: result.height,
+          bytes: result.bytes,
+          originalFilename,
+          sortOrder: 0,
+          isCover: false,
+        });
+      } catch (e: any) {
+        console.error('Cloudinary upload error:', e?.message);
+        // fall through to base64 fallback
+      }
+    }
+
+    // Fallback: return base64 data URL so the UI still works without Cloudinary
+    const base64 = fileBuffer.toString('base64');
+    const safeType = mimetype !== 'application/octet-stream' ? mimetype : 'image/jpeg';
+    return res.status(201).json({
+      publicId: `ph_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      secureUrl: `data:${safeType};base64,${base64}`,
+      format: originalFilename.split('.').pop() || 'jpg',
+      resourceType: 'image',
+      width: 1920,
+      height: 1080,
+      bytes: fileBuffer.length,
+      originalFilename,
+      sortOrder: 0,
+      isCover: false,
+    });
+  }
+
+  // ── DELETE /api/images/:publicId ─────────────────────────────────────────
+  const imgMatch = path.match(/^\/api\/images\/(.+)$/);
+  if (imgMatch && method === 'DELETE') {
+    const session = await resolveSession(getToken(req));
+    if (!session || (session.role !== 'admin' && session.role !== 'agent')) {
+      return res.status(401).json({ error: 'Authentication required.' });
+    }
+    const publicId = decodeURIComponent(imgMatch[1]);
+    const hasCloudinary = Boolean(process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET);
+    if (hasCloudinary) {
+      try {
+        const { v2: cloudinary } = await import('cloudinary');
+        cloudinary.config({ cloud_name: process.env.CLOUDINARY_CLOUD_NAME, api_key: process.env.CLOUDINARY_API_KEY, api_secret: process.env.CLOUDINARY_API_SECRET, secure: true });
+        await cloudinary.uploader.destroy(publicId);
+      } catch (e: any) {
+        console.error('Cloudinary delete error:', e?.message);
+      }
+    }
+    return res.status(200).json({ success: true, publicId });
+  }
+
   return res.status(404).json({ error: 'API route not found.' });
 }
