@@ -13,7 +13,6 @@ import { InquiryModel } from './src/models/Inquiry.ts';
 import { UserModel, USER_ROLES, USER_STATUSES } from './src/models/User.ts';
 import { normalizePropertyImages } from './src/lib/cloudinary.ts';
 import { getImageAssetRefs, destroyImageAssets } from './src/lib/propertyImageAssets.ts';
-import { isPasswordlessAdminEmail } from './src/lib/passwordlessAdmins.ts';
 import {
   normalizeEmail,
   createUserSessionToken,
@@ -198,9 +197,8 @@ app.post('/api/auth/login', loginLimiter, async (req: Request, res: Response) =>
     }
 
     const normalized = normalizeEmail(email);
-    const passwordless = isPasswordlessAdminEmail(normalized);
 
-    if (!passwordless && (typeof password !== 'string' || !password)) {
+    if (typeof password !== 'string' || !password) {
       return res.status(400).json({ error: 'Password is required.' });
     }
 
@@ -209,11 +207,7 @@ app.post('/api/auth/login', loginLimiter, async (req: Request, res: Response) =>
     }
 
     const user = await UserModel.findOne({ email: normalized }).select('+passwordHash');
-    const passwordMatches = passwordless
-      ? Boolean(user)
-      : user
-        ? await verifyPassword(password, user.passwordHash)
-        : false;
+    const passwordMatches = user ? await verifyPassword(password, user.passwordHash) : false;
     if (!user || !passwordMatches) {
       return res.status(401).json({ error: 'Incorrect email or password.' });
     }

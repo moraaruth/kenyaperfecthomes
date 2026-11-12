@@ -3,7 +3,6 @@ import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { getImageAssetRefs, destroyImageAssets, ImageAssetRef } from '../src/lib/propertyImageAssets';
-import { isPasswordlessAdminEmail } from '../src/lib/passwordlessAdmins';
 
 function parseCookies(header: string): Record<string, string> {
   const out: Record<string, string> = {};
@@ -266,9 +265,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { email, password } = req.body || {};
     if (!email) return res.status(400).json({ error: 'Email address is required.' });
     const normalized = normalizeEmail(email);
-    const passwordless = isPasswordlessAdminEmail(normalized);
-
-    if (!passwordless && !password) return res.status(400).json({ error: 'Password is required.' });
+    if (!password) return res.status(400).json({ error: 'Password is required.' });
     if (!db) return res.status(503).json({ error: 'Account service is temporarily unavailable.' });
 
     const ip = String((req.headers['x-forwarded-for'] as string) || req.socket?.remoteAddress || 'unknown').split(',')[0].trim();
@@ -277,11 +274,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const user = await User.findOne({ email: normalized }).select('+passwordHash');
-    const ok = passwordless
-      ? Boolean(user)
-      : user
-        ? await bcrypt.compare(password, user.passwordHash)
-        : false;
+    const ok = user ? await bcrypt.compare(password, user.passwordHash) : false;
     if (!user || !ok) {
       recordLoginFailure(ip, normalized);
       return res.status(401).json({ error: 'Incorrect email or password.' });
