@@ -103,9 +103,7 @@ export const PropertyImageUploader: React.FC<PropertyImageUploaderProps> = ({
         prev.map((i) => i.id === item.id ? { ...i, status: 'processing', progress: 75 } : i)
       );
 
-      const token = typeof window !== 'undefined' ? localStorage.getItem('ph_admin_token') : null;
       const headers: Record<string, string> = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
 
       const res = await fetch('/api/upload', {
         method: 'POST',
@@ -207,9 +205,7 @@ export const PropertyImageUploader: React.FC<PropertyImageUploaderProps> = ({
     // Call server to destroy Cloudinary asset asynchronously
     if (target.publicId && !target.publicId.startsWith('default_') && !target.publicId.startsWith('sample_')) {
       try {
-        const token = typeof window !== 'undefined' ? localStorage.getItem('ph_admin_token') : null;
         const headers: Record<string, string> = {};
-        if (token) headers['Authorization'] = `Bearer ${token}`;
 
         await fetch(`/api/images/${encodeURIComponent(target.publicId)}`, {
           method: 'DELETE',

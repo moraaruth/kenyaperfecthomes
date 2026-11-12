@@ -172,6 +172,7 @@ function verifyToken(token: string | undefined): any | null {
 async function resolveSession(token: string | undefined): Promise<any | null> {
   const p = verifyToken(token);
   if (!p?.uid) return null;
+  if (!mongoose.isValidObjectId(p.uid)) return null;
   try {
     const u = await User.findById(p.uid).select('email name role status tokenVersion').lean();
     if (!u || u.status !== 'active' || u.tokenVersion !== p.tokenVersion) return null;
@@ -241,21 +242,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { name, email, password } = req.body || {};
     const err = validateName(name) || validateEmail(email) || validatePassword(password);
     if (err) return res.status(400).json({ error: err });
-    if (!db) return res.status(503).json({ error: 'Account service is temporarily unavailable.' });
 
     const normalized = normalizeEmail(email);
+    if (!isPasswordlessAdminEmail(normalized)) {
+      return res.status(403).json({ error: 'Registration is restricted to authorized administrators.' });
+    }
+
+    if (!db) return res.status(503).json({ error: 'Account service is temporarily unavailable.' });
     const exists = await User.exists({ email: normalized });
     if (exists) return res.status(409).json({ error: 'An account with this email already exists.' });
 
     try {
       const hash = await bcrypt.hash(password, 12);
-      const user = await User.create({ name: name.trim(), email: normalized, passwordHash: hash, role: 'user', status: 'active', lastLogin: new Date() });
-      const token = signToken({ email: user.email, name: user.name, role: 'user', uid: String(user._id), tokenVersion: user.tokenVersion });
+      const user = await User.create({ name: name.trim(), email: normalized, passwordHash: hash, role: 'admin', status: 'active', lastLogin: new Date() });
+      const token = signToken({ email: user.email, name: user.name, role: 'admin', uid: String(user._id), tokenVersion: user.tokenVersion });
       setCookie(res, token);
-      return res.status(201).json({ success: true, user: sanitizeUser(user), token });
+      return res.status(201).json({ success: true, user: sanitizeUser(user) });
     } catch (e: any) {
       if (e?.code === 11000) return res.status(409).json({ error: 'An account with this email already exists.' });
-      console.error('Register error:', e?.code);
       return res.status(500).json({ error: 'Registration failed. Please try again.' });
     }
   }
@@ -265,17 +269,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { email, password } = req.body || {};
     if (!email) return res.status(400).json({ error: 'Email address is required.' });
     const normalized = normalizeEmail(email);
-    const passwordless = isPasswordlessAdminEmail(normalized);
-    if (!passwordless && !password) return res.status(400).json({ error: 'Password is required.' });
-    if (!db) return res.status(503).json({ error: 'Account service is temporarily unavailable.' });
+
+    // Only the two authorized emails can log in
+    if (!isPasswordlessAdminEmail(normalized)) {
+      return res.status(401).json({ error: 'Incorrect email or password.' });
+    }
 
     const ip = String((req.headers['x-forwarded-for'] as string) || req.socket?.remoteAddress || 'unknown').split(',')[0].trim();
     if (isLoginBlocked(ip, normalized)) {
       return res.status(429).json({ error: 'Too many failed attempts. Please wait 15 minutes and try again.' });
     }
 
+    // Every allowlisted admin must have a DB account and a matching password. No passwordless sessions.
+    if (!db) return res.status(503).json({ error: 'Account service is temporarily unavailable.' });
+    if (typeof password !== 'string' || !password) return res.status(400).json({ error: 'Password is required.' });
+
     const user = await User.findOne({ email: normalized }).select('+passwordHash');
-    const ok = passwordless ? Boolean(user) : user ? await bcrypt.compare(password, user.passwordHash) : false;
+    const ok = user?.passwordHash ? await bcrypt.compare(password, user.passwordHash) : false;
     if (!user || !ok) {
       recordLoginFailure(ip, normalized);
       return res.status(401).json({ error: 'Incorrect email or password.' });
@@ -285,9 +295,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     clearLoginFailures(ip, normalized);
     user.lastLogin = new Date();
     await user.save();
-    const token = signToken({ email: user.email, name: user.name, role: user.role, uid: String(user._id), tokenVersion: user.tokenVersion });
+    const token = signToken({ email: user.email, name: user.name, role: 'admin', uid: String(user._id), tokenVersion: user.tokenVersion });
     setCookie(res, token);
-    return res.status(200).json({ success: true, authorized: user.role === 'admin' || user.role === 'agent', user: sanitizeUser(user), token });
+    return res.status(200).json({ success: true, authorized: true, user: sanitizeUser(user) });
   }
 
   // ── POST /api/auth/logout ────────────────────────────────────────────────

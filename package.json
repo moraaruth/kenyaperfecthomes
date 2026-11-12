@@ -4,11 +4,11 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx server.ts",
+    "dev": "concurrently \"tsx server.ts\" \"vite\"",
     "build": "vite build",
-    "start": "node server.ts",
+    "start": "vite preview",
     "preview": "vite preview",
-    "clean": "rm -rf dist server.js",
+    "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
     "seed:admins": "tsx scripts/seed-admins.ts"
   },
@@ -41,7 +41,7 @@
     "@types/react-dom": "^19.3.0",
     "@vercel/node": "^30.0.0",
     "autoprefixer": "^10.4.21",
-    "esbuild": "^0.25.0",
+    "concurrently": "^10.0.7",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",
     "typescript": "^7.0.2"

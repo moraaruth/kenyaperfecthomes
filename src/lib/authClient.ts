@@ -33,7 +33,6 @@ async function apiRequest<T>(url: string, init: RequestInit = {}): Promise<ApiRe
       ...init,
       headers: {
         ...(init.body ? { 'Content-Type': 'application/json' } : {}),
-        ...(getStoredToken() ? { Authorization: `Bearer ${getStoredToken()}` } : {}),
         ...(init.headers || {}),
       },
     });
@@ -53,35 +52,22 @@ export interface AuthStatus {
   user: AdminUser | null;
 }
 
-const TOKEN_KEY = 'ph_admin_token';
+const LEGACY_TOKEN_KEY = 'ph_admin_token';
 
-export function getStoredToken(): string | null {
-  if (typeof window === 'undefined') return null;
-  return localStorage.getItem(TOKEN_KEY);
-}
-
-export function saveStoredToken(token: string | null): void {
+// Sessions live only in the HttpOnly cookie. Remove any token left by older builds.
+function clearLegacyToken(): void {
   if (typeof window === 'undefined') return;
-  if (token) {
-    localStorage.setItem(TOKEN_KEY, token);
-  } else {
-    localStorage.removeItem(TOKEN_KEY);
-  }
+  localStorage.removeItem(LEGACY_TOKEN_KEY);
 }
 
 /**
  * Checks current session with the server
  */
 export async function checkAdminSession(): Promise<AuthStatus> {
-  const token = getStoredToken();
-  const headers: Record<string, string> = {};
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
+  clearLegacyToken();
 
   try {
     const res = await fetch('/api/auth/me', {
-      headers,
       credentials: 'include',
     });
     if (res.ok) {
@@ -110,7 +96,7 @@ export interface LoginResult {
  * Signs in with email and password. Every account, including administrators, requires a password.
  */
 export async function loginAdmin(email: string, password: string): Promise<LoginResult> {
-  const result = await apiRequest<{ authorized: boolean; user: AdminUser; token?: string }>(
+  const result = await apiRequest<{ authorized: boolean; user: AdminUser }>(
     '/api/auth/login',
     { method: 'POST', body: JSON.stringify({ email, password }) }
   );
@@ -119,9 +105,7 @@ export async function loginAdmin(email: string, password: string): Promise<Login
     return { success: false, authorized: false, error: result.error };
   }
 
-  if (result.data.token) {
-    saveStoredToken(result.data.token);
-  }
+  clearLegacyToken();
 
   return {
     success: true,
@@ -134,7 +118,7 @@ export async function loginAdmin(email: string, password: string): Promise<Login
  * Creates a standard (non-staff) account. The user can sign in immediately.
  */
 export async function registerAccount(name: string, email: string, password: string): Promise<LoginResult> {
-  const result = await apiRequest<{ user: AdminUser; token?: string }>('/api/auth/register', {
+  const result = await apiRequest<{ user: AdminUser }>('/api/auth/register', {
     method: 'POST',
     body: JSON.stringify({ name, email, password }),
   });
@@ -143,9 +127,7 @@ export async function registerAccount(name: string, email: string, password: str
     return { success: false, authorized: false, error: result.error };
   }
 
-  if (result.data.token) {
-    saveStoredToken(result.data.token);
-  }
+  clearLegacyToken();
 
   return { success: true, authorized: false, user: result.data.user };
 }
@@ -209,7 +191,7 @@ export async function createManagedUserResetLink(id: string) {
  * Logs out the administrator
  */
 export async function logoutAdmin(): Promise<void> {
-  saveStoredToken(null);
+  clearLegacyToken();
   try {
     await fetch('/api/auth/logout', {
       method: 'POST',

@@ -97,9 +97,7 @@ export async function fetchProperties(filters?: SearchFilters): Promise<Property
 // Add new property (Protected)
 export async function addProperty(propertyData: Omit<Property, '_id' | 'createdAt' | 'slug'>): Promise<Property> {
   try {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('ph_admin_token') : null;
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (token) headers['Authorization'] = `Bearer ${token}`;
 
     // Do NOT send _id, id, slug, or createdAt — the server generates these.
     // Sending a non-ObjectId string as _id causes a Mongoose CastError.
@@ -128,9 +126,7 @@ export async function addProperty(propertyData: Omit<Property, '_id' | 'createdA
 // Update property (Protected)
 export async function updateProperty(id: string, updates: Partial<Property>): Promise<Property | null> {
   try {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('ph_admin_token') : null;
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (token) headers['Authorization'] = `Bearer ${token}`;
 
     const res = await fetch(`/api/properties/${id}`, {
       method: 'PATCH',
@@ -159,9 +155,7 @@ export async function updateProperty(id: string, updates: Partial<Property>): Pr
 
 // Delete property (Protected). Throws on failure; local cache is only updated after the server confirms.
 export async function deleteProperty(id: string): Promise<void> {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('ph_admin_token') : null;
   const headers: Record<string, string> = {};
-    if (token) headers['Authorization'] = `Bearer ${token}`;
 
   const res = await fetch(`/api/properties/${id}`, {
     method: 'DELETE',

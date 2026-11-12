@@ -12,12 +12,10 @@ export default defineConfig(() => {
       },
     },
     server: {
-      hmr: process.env.DISABLE_HMR !== 'true'
-        ? { clientPort: 3000, path: '/@vite/client' }
-        : false,
+      hmr: process.env.DISABLE_HMR !== 'true' ? true : false,
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
       proxy: {
-        '/api': 'http://localhost:3000',
+        '/api': { target: 'http://localhost:3001', changeOrigin: true },
       },
     },
   };
