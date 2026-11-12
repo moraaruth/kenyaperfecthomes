@@ -17,11 +17,15 @@ import {
   getSavedPropertyIds,
   toggleSaveProperty,
 } from './lib/propertyStore';
-import { checkAdminSession, AdminUser, logoutAdmin } from './lib/authClient';
-import { isAdminEmail } from './lib/adminAccess';
+import { checkAdminSession, AdminUser, logoutAdmin, canManageProperties } from './lib/authClient';
+
+const RESET_PATH = '/reset-password';
 
 export default function App() {
-  const [currentTab, setCurrentTab] = useState<string>('home');
+  const isResetRoute = typeof window !== 'undefined' && window.location.pathname === RESET_PATH;
+  const resetToken = isResetRoute ? new URLSearchParams(window.location.search).get('token') : null;
+  const [currentTab, setCurrentTab] = useState<string>(isResetRoute ? 'admin' : 'home');
+  const [resetRouteActive, setResetRouteActive] = useState<boolean>(isResetRoute);
   const [properties, setProperties] = useState<Property[]>([]);
   const [savedIds, setSavedIds] = useState<string[]>([]);
   const [selectedProperty, setSelectedProperty] = useState<Property | null>(null);
@@ -30,10 +34,10 @@ export default function App() {
   const [adminUser, setAdminUser] = useState<AdminUser | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  // Only accounts on the strict admin allowlist are ever stored as adminUser
-  const isAuthorizedAdmin = isAdminEmail(adminUser?.email);
+  // Only staff accounts (admin or agent) from the server are stored as adminUser
+  const isAuthorizedAdmin = canManageProperties(adminUser);
   const setAuthorizedAdmin = (user: AdminUser | null) => {
-    setAdminUser(user && isAdminEmail(user.email) ? user : null);
+    setAdminUser(user && canManageProperties(user) ? user : null);
   };
 
   // Initialize properties and check for existing verified admin session
@@ -189,7 +193,27 @@ export default function App() {
         )}
 
         {/* Administration Portal Routing */}
+        {currentTab === 'admin' && resetRouteActive && (
+          <AdminLoginPage
+            resetToken={resetToken}
+            onLoginSuccess={(user) => {
+              setAuthorizedAdmin(user);
+              setCurrentTab('admin');
+            }}
+            onResetComplete={() => {
+              window.history.replaceState(null, '', '/');
+              setResetRouteActive(false);
+            }}
+            onReturnHome={() => {
+              window.history.replaceState(null, '', '/');
+              setResetRouteActive(false);
+              handleNavigate('home');
+            }}
+          />
+        )}
+
         {currentTab === 'admin' &&
+          !resetRouteActive &&
           (isAuthorizedAdmin && adminUser ? (
             <AdminDashboardPage
               adminUser={adminUser}
@@ -209,6 +233,7 @@ export default function App() {
               onReturnHome={() => handleNavigate('home')}
             />
           ))}
+
       </main>
 
       {/* Global Property Detail Modal */}

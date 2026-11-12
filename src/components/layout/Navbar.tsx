@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { Home, Search, Calendar, Phone, PlusCircle, Bell, Heart, Menu, X, Shield, ShieldCheck, LogIn, LogOut, CheckCircle2 } from 'lucide-react';
-import { AdminUser } from '../../lib/authClient';
-import { isAdminEmail } from '../../lib/adminAccess';
+import { AdminUser, canManageProperties } from '../../lib/authClient';
 import logo from '../../assets/images/logo.jpg';
 
 interface NavbarProps {
@@ -28,7 +27,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   // Single source of truth: authenticated AND on the two-email admin allowlist.
   // Never rely on adminUser alone, since it only proves a session exists.
-  const isAuthorizedAdmin = isAdminEmail(adminUser?.email);
+  const isAuthorizedAdmin = canManageProperties(adminUser);
 
   const baseNavLinks = [
     { id: 'home', label: 'Home', icon: Home },

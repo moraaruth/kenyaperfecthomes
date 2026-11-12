@@ -1,18 +1,27 @@
 import crypto from 'crypto';
 import { Request, Response, NextFunction } from 'express';
 import { ADMIN_EMAILS, normalizeEmail, isAdminEmail } from './adminAccess';
+import { UserModel } from '../models/User.ts';
 
 export { ADMIN_EMAILS, normalizeEmail, isAdminEmail };
 
 export const SESSION_COOKIE_NAME = 'ph_admin_session';
 const SESSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
+export type UserRole = 'admin' | 'agent' | 'user';
+
 export interface AdminSession {
   email: string;
   name: string;
+  role: UserRole;
+  // Present only for database accounts. Allowlisted admins have no uid.
+  uid?: string;
+  tokenVersion?: number;
   issuedAt: number;
   expiresAt: number;
 }
+
+type SessionPayload = Omit<AdminSession, 'issuedAt' | 'expiresAt'>;
 
 // Extends Express Request to attach adminUser
 export interface AuthenticatedRequest extends Request {
@@ -27,15 +36,9 @@ const getSecretKey = (): string => {
  * Creates a cryptographically signed session token:
  * payload.signature (HMAC SHA-256)
  */
-export function createAdminSessionToken(email: string, name?: string): string {
-  const normalized = normalizeEmail(email);
-  if (!isAdminEmail(normalized)) {
-    throw new Error(`Unauthorized email address: ${normalized}`);
-  }
-
+export function signSessionToken(payload: SessionPayload): string {
   const session: AdminSession = {
-    email: normalized,
-    name: name || (normalized === 'iammoraaruth@gmail.com' ? 'Ruth Moraa' : 'Josiah M.'),
+    ...payload,
     issuedAt: Date.now(),
     expiresAt: Date.now() + SESSION_DURATION_MS,
   };
@@ -49,10 +52,35 @@ export function createAdminSessionToken(email: string, name?: string): string {
   return `${payloadStr}.${signature}`;
 }
 
+/** Token for an allowlisted administrator (email-only sign-in, no database account). */
+export function createAdminSessionToken(email: string, name?: string): string {
+  const normalized = normalizeEmail(email);
+  if (!isAdminEmail(normalized)) {
+    throw new Error(`Unauthorized email address: ${normalized}`);
+  }
+
+  return signSessionToken({
+    email: normalized,
+    name: name || (normalized === 'iammoraaruth@gmail.com' ? 'Ruth Moraa' : 'Josiah M.'),
+    role: 'admin',
+  });
+}
+
+/** Token for a database account. Role and status are re-checked on every request. */
+export function createUserSessionToken(user: { id: string; email: string; name: string; tokenVersion: number }): string {
+  return signSessionToken({
+    email: user.email,
+    name: user.name,
+    role: 'user',
+    uid: user.id,
+    tokenVersion: user.tokenVersion,
+  });
+}
+
 /**
- * Verifies a signed session token. Returns the AdminSession if valid and authorized, or null.
+ * Verifies the signature and expiry only. Use resolveSession for authorization.
  */
-export function verifyAdminSessionToken(token: string | null | undefined): AdminSession | null {
+export function verifySessionSignature(token: string | null | undefined): AdminSession | null {
   if (!token || typeof token !== 'string') return null;
 
   const parts = token.split('.');
@@ -80,11 +108,6 @@ export function verifyAdminSessionToken(token: string | null | undefined): Admin
       return null;
     }
 
-    // Verify against strict allowlist
-    if (!isAdminEmail(session.email)) {
-      return null;
-    }
-
     return session;
   } catch {
     return null;
@@ -92,11 +115,38 @@ export function verifyAdminSessionToken(token: string | null | undefined): Admin
 }
 
 /**
- * Server-Side Express Middleware: requireAdminAuth
- * Enforces both authentication AND authorization against the strict two-email allowlist.
+ * Authorizes a session against current server state.
+ * - Allowlisted admins (no uid): must still be on the allowlist.
+ * - Database accounts: must exist, be active, and have a matching tokenVersion.
+ *   The role comes from the database, so role changes apply immediately.
  */
-export function requireAdminAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
-  // Extract token from HTTP-only cookie or Authorization header
+export async function resolveSession(token: string | null | undefined): Promise<AdminSession | null> {
+  const session = verifySessionSignature(token);
+  if (!session) return null;
+
+  if (!session.uid) {
+    if (!isAdminEmail(session.email)) return null;
+    return { ...session, role: 'admin' };
+  }
+
+  try {
+    const user = await UserModel.findById(session.uid).select('email name role status tokenVersion').lean();
+    if (!user || user.status !== 'active' || user.tokenVersion !== session.tokenVersion) {
+      return null;
+    }
+    return {
+      ...session,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      tokenVersion: user.tokenVersion,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function extractToken(req: Request): string | undefined {
   let token = req.cookies?.[SESSION_COOKIE_NAME];
   if (!token && req.headers.authorization) {
     const parts = req.headers.authorization.split(' ');
@@ -104,22 +154,45 @@ export function requireAdminAuth(req: AuthenticatedRequest, res: Response, next:
       token = parts[1];
     }
   }
-
-  if (!token) {
-    return res.status(401).json({
-      error: 'Authentication required. Please sign in to the Perfect Homes Admin Portal.',
-      code: 'UNAUTHENTICATED',
-    });
-  }
-
-  const session = verifyAdminSessionToken(token);
-  if (!session) {
-    return res.status(403).json({
-      error: 'Access denied: You are not authorized to access administrative operations.',
-      code: 'FORBIDDEN',
-    });
-  }
-
-  req.adminUser = session;
-  next();
+  return token;
 }
+
+/**
+ * Express middleware factory: authenticates the request and checks its role.
+ */
+export function requireRoles(...roles: UserRole[]) {
+  return async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    const token = extractToken(req);
+
+    if (!token) {
+      return res.status(401).json({
+        error: 'Authentication required. Please sign in to the Perfect Homes Admin Portal.',
+        code: 'UNAUTHENTICATED',
+      });
+    }
+
+    const session = await resolveSession(token);
+    if (!session) {
+      return res.status(401).json({
+        error: 'Your session has expired or the account is no longer active. Please sign in again.',
+        code: 'SESSION_INVALID',
+      });
+    }
+
+    if (!roles.includes(session.role)) {
+      return res.status(403).json({
+        error: 'Access denied: your account does not have permission for this action.',
+        code: 'FORBIDDEN',
+      });
+    }
+
+    req.adminUser = session;
+    next();
+  };
+}
+
+/** Staff access: administrators and agents. */
+export const requireAdminAuth = requireRoles('admin', 'agent');
+
+/** Administrator-only access, e.g. user management. */
+export const requireAdminOnly = requireRoles('admin');

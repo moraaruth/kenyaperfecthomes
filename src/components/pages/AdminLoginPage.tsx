@@ -1,41 +1,150 @@
 import React, { useState } from 'react';
-import { Shield, Lock, AlertTriangle, CheckCircle2, ArrowRight, UserCheck, KeyRound } from 'lucide-react';
-import { loginAdmin, AdminUser } from '../../lib/authClient';
+import { Shield, Lock, AlertTriangle, CheckCircle2, KeyRound } from 'lucide-react';
+import {
+  loginAdmin,
+  registerAccount,
+  requestPasswordReset,
+  resetPassword,
+  canManageProperties,
+  AdminUser,
+} from '../../lib/authClient';
+
+type AuthMode = 'signin' | 'register' | 'forgot' | 'reset';
 
 interface AdminLoginPageProps {
   onLoginSuccess: (user: AdminUser) => void;
   onReturnHome: () => void;
   initialMessage?: string;
+  resetToken?: string | null;
+  onResetComplete?: () => void;
 }
+
+const MIN_PASSWORD_LENGTH = 8;
+
+const inputClass =
+  'w-full px-4 py-3 text-sm rounded-xl border border-neutral-300 bg-neutral-50/70 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-700 text-neutral-900 placeholder:text-neutral-400 shadow-xs';
+const labelClass = 'block text-xs font-bold text-neutral-800 uppercase tracking-wider mb-2';
 
 export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({
   onLoginSuccess,
   onReturnHome,
   initialMessage,
+  resetToken,
+  onResetComplete,
 }) => {
+  const [mode, setMode] = useState<AuthMode>(resetToken ? 'reset' : 'signin');
+  const [name, setName] = useState('');
   const [emailInput, setEmailInput] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [successUser, setSuccessUser] = useState<AdminUser | null>(null);
 
-  const handlePerformLogin = async (targetEmail: string, displayName?: string) => {
+  const switchMode = (next: AuthMode) => {
+    setMode(next);
+    setErrorMessage(null);
+    setInfoMessage(null);
+    setPassword('');
+    setConfirmPassword('');
+  };
+
+  const passwordTooShort = (value: string) => value.length < MIN_PASSWORD_LENGTH;
+
+  const handleSignIn = async () => {
     setIsAuthenticating(true);
     setErrorMessage(null);
-
-    const result = await loginAdmin(targetEmail, displayName);
+    const result = await loginAdmin(emailInput.trim(), password || undefined);
     setIsAuthenticating(false);
 
-    if (result.success && result.authorized && result.user) {
-      setSuccessUser(result.user);
-      setTimeout(() => {
-        onLoginSuccess(result.user!);
-      }, 700);
-    } else {
-      setErrorMessage(
-        result.error ||
-          `Access Restricted: "${targetEmail}" is not authorized to access the Perfect Homes Admin Portal.`
-      );
+    if (!result.success || !result.user) {
+      setErrorMessage(result.error || 'Sign in failed. Please try again.');
+      return;
     }
+    if (!result.authorized || !canManageProperties(result.user)) {
+      setErrorMessage('This account does not have staff access. Please contact an administrator.');
+      return;
+    }
+    setSuccessUser(result.user);
+    setTimeout(() => onLoginSuccess(result.user!), 700);
+  };
+
+  const handleRegister = async () => {
+    if (passwordTooShort(password)) {
+      setErrorMessage(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
+      return;
+    }
+    if (password !== confirmPassword) {
+      setErrorMessage('Passwords do not match.');
+      return;
+    }
+    setIsAuthenticating(true);
+    setErrorMessage(null);
+    const result = await registerAccount(name.trim(), emailInput.trim(), password);
+    setIsAuthenticating(false);
+
+    if (!result.success) {
+      setErrorMessage(result.error || 'Registration failed. Please try again.');
+      return;
+    }
+    switchMode('signin');
+    setInfoMessage('Your account has been created. An administrator must grant you staff access before you can manage listings.');
+  };
+
+  const handleForgot = async () => {
+    setIsAuthenticating(true);
+    setErrorMessage(null);
+    const result = await requestPasswordReset(emailInput.trim());
+    setIsAuthenticating(false);
+    if (!result.ok) {
+      setErrorMessage(result.message);
+      return;
+    }
+    setInfoMessage(result.message);
+  };
+
+  const handleReset = async () => {
+    if (!resetToken) {
+      setErrorMessage('This reset link is missing its token. Please request a new one.');
+      return;
+    }
+    if (passwordTooShort(password)) {
+      setErrorMessage(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
+      return;
+    }
+    if (password !== confirmPassword) {
+      setErrorMessage('Passwords do not match.');
+      return;
+    }
+    setIsAuthenticating(true);
+    setErrorMessage(null);
+    const result = await resetPassword(resetToken, password);
+    setIsAuthenticating(false);
+    if (!result.ok) {
+      setErrorMessage(result.message);
+      return;
+    }
+    setInfoMessage(result.message);
+    setPassword('');
+    setConfirmPassword('');
+    onResetComplete?.();
+    setMode('signin');
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (mode === 'signin') handleSignIn();
+    else if (mode === 'register') handleRegister();
+    else if (mode === 'forgot') handleForgot();
+    else handleReset();
+  };
+
+  const titles: Record<AuthMode, { heading: string; button: string }> = {
+    signin: { heading: 'Sign in to your account', button: 'Sign In' },
+    register: { heading: 'Create an account', button: 'Create Account' },
+    forgot: { heading: 'Reset your password', button: 'Request Reset' },
+    reset: { heading: 'Choose a new password', button: 'Set New Password' },
   };
 
   return (
@@ -73,14 +182,22 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({
             </div>
           )}
 
-          {/* Error Banner when non-allowlisted email attempts login */}
+          {/* Error Banner */}
           {errorMessage && (
             <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs space-y-1.5 animate-in fade-in">
               <div className="flex items-center gap-2 font-bold text-rose-900">
                 <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-                <span>Access Denied (403 Forbidden)</span>
+                <span>Unable to continue</span>
               </div>
               <p className="leading-relaxed">{errorMessage}</p>
+            </div>
+          )}
+
+          {/* Info Banner */}
+          {infoMessage && !errorMessage && (
+            <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-start gap-2.5 font-semibold animate-in fade-in">
+              <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+              <span className="leading-relaxed">{infoMessage}</span>
             </div>
           )}
 
@@ -92,54 +209,115 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({
             </div>
           )}
 
-          {/* Secure Admin Credentials Form */}
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (emailInput.trim()) {
-                handlePerformLogin(emailInput.trim());
-              }
-            }}
-            className="space-y-5"
-          >
-            <div>
-              <label className="block text-xs font-bold text-neutral-800 uppercase tracking-wider mb-2">
-                Administrator Email Address
-              </label>
-              <div className="relative">
+          <div className="text-center">
+            <p className="text-sm font-bold text-neutral-900">{titles[mode].heading}</p>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-5">
+            {mode === 'register' && (
+              <div>
+                <label className={labelClass}>Full Name</label>
                 <input
-                  type="email"
+                  type="text"
                   required
-                  autoFocus
-                  autoComplete="email"
-                  value={emailInput}
-                  onChange={(e) => setEmailInput(e.target.value)}
-                  placeholder="Enter your authorized admin email..."
-                  className="w-full px-4 py-3 text-sm rounded-xl border border-neutral-300 bg-neutral-50/70 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-700 font-mono text-neutral-900 placeholder:font-sans placeholder:text-neutral-400 shadow-xs"
+                  autoComplete="name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className={inputClass}
                 />
               </div>
-              <p className="text-[11px] text-neutral-500 mt-1.5 leading-relaxed">
-                Enter your designated administrative email. Only pre-registered administrator accounts are permitted access.
-              </p>
+            )}
+
+            <div>
+              <label className={labelClass}>Email Address</label>
+              <input
+                type="email"
+                required
+                autoFocus
+                autoComplete="email"
+                value={emailInput}
+                onChange={(e) => setEmailInput(e.target.value)}
+                placeholder="you@example.com"
+                className={`${inputClass} font-mono placeholder:font-sans`}
+              />
             </div>
+
+            {(mode === 'signin' || mode === 'register') && (
+              <div>
+                <label className={labelClass}>Password</label>
+                <input
+                  type="password"
+                  required={mode === 'register'}
+                  autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className={inputClass}
+                />
+                {mode === 'signin' && (
+                  <p className="text-[11px] text-neutral-500 mt-1.5 leading-relaxed">
+                    Administrator emails on the approved list can leave this blank.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {(mode === 'register' || mode === 'reset') && (
+              <>
+                <div>
+                  <label className={labelClass}>{mode === 'reset' ? 'New Password' : 'Password'}</label>
+                  <input
+                    type="password"
+                    required
+                    minLength={MIN_PASSWORD_LENGTH}
+                    autoComplete="new-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className={inputClass}
+                  />
+                  <p className="text-[11px] text-neutral-500 mt-1.5">At least {MIN_PASSWORD_LENGTH} characters.</p>
+                </div>
+                <div>
+                  <label className={labelClass}>Confirm Password</label>
+                  <input
+                    type="password"
+                    required
+                    minLength={MIN_PASSWORD_LENGTH}
+                    autoComplete="new-password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    className={inputClass}
+                  />
+                </div>
+              </>
+            )}
 
             <button
               type="submit"
-              disabled={isAuthenticating || !emailInput.trim()}
+              disabled={isAuthenticating || !emailInput.trim() || (mode === 'reset' && !resetToken)}
               className="w-full bg-brand-800 hover:bg-brand-900 disabled:opacity-50 text-white font-bold py-3.5 px-4 rounded-xl text-sm transition-all shadow-md hover:shadow-lg active:scale-98 flex items-center justify-center gap-2"
             >
               <KeyRound className="w-4 h-4 text-amber-300" />
-              <span>{isAuthenticating ? 'Authenticating Identity...' : 'Sign In as Administrator'}</span>
+              <span>{isAuthenticating ? 'Please wait...' : titles[mode].button}</span>
             </button>
           </form>
 
-        
-          <div className="pt-1 text-center">
-            <button
-              type="button"
-              onClick={onReturnHome}
-              className="text-xs font-semibold text-neutral-500 hover:text-neutral-800 transition-colors"
-            >
+          <div className="pt-1 flex flex-col items-center gap-2 text-xs font-semibold text-neutral-500">
+            {mode === 'signin' && (
+              <>
+                <button type="button" onClick={() => switchMode('register')} className="hover:text-neutral-800 transition-colors">
+                  New here? Create an account
+                </button>
+                <button type="button" onClick={() => switchMode('forgot')} className="hover:text-neutral-800 transition-colors">
+                  Forgot password?
+                </button>
+              </>
+            )}
+            {(mode === 'register' || mode === 'forgot') && (
+              <button type="button" onClick={() => switchMode('signin')} className="hover:text-neutral-800 transition-colors">
+                Back to sign in
+              </button>
+            )}
+            <button type="button" onClick={onReturnHome} className="hover:text-neutral-800 transition-colors">
               ← Home
             </button>
           </div>

@@ -1,8 +1,50 @@
+export type StaffRole = 'admin' | 'agent' | 'user';
+export type AccountStatus = 'active' | 'suspended' | 'disabled';
+
 export interface AdminUser {
   email: string;
   name: string;
+  role: StaffRole;
   issuedAt?: number;
   expiresAt?: number;
+}
+
+export interface ManagedUser {
+  id: string;
+  name: string;
+  email: string;
+  role: StaffRole;
+  status: AccountStatus;
+  lastLogin?: string | null;
+  createdAt?: string;
+}
+
+export const canManageProperties = (user: AdminUser | null | undefined): boolean =>
+  user?.role === 'admin' || user?.role === 'agent';
+
+export const isFullAdmin = (user: AdminUser | null | undefined): boolean => user?.role === 'admin';
+
+type ApiResult<T> = { ok: true; data: T } | { ok: false; error: string };
+
+async function apiRequest<T>(url: string, init: RequestInit = {}): Promise<ApiResult<T>> {
+  try {
+    const res = await fetch(url, {
+      credentials: 'include',
+      ...init,
+      headers: {
+        ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+        ...(getStoredToken() ? { Authorization: `Bearer ${getStoredToken()}` } : {}),
+        ...(init.headers || {}),
+      },
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { ok: false, error: data.error || 'Request failed. Please try again.' };
+    }
+    return { ok: true, data: data as T };
+  } catch {
+    return { ok: false, error: 'Network error. Please check your connection and try again.' };
+  }
 }
 
 export interface AuthStatus {
@@ -57,49 +99,110 @@ export async function checkAdminSession(): Promise<AuthStatus> {
   return { authenticated: false, authorized: false, user: null };
 }
 
-/**
- * Attempts to log in to the Admin Portal with an email
- */
-export async function loginAdmin(email: string, name?: string): Promise<{
+export interface LoginResult {
   success: boolean;
   authorized: boolean;
   user?: AdminUser;
   error?: string;
-}> {
-  try {
-    const res = await fetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ email, name }),
-    });
+}
 
-    const data = await res.json();
+/**
+ * Signs in with email and password. Pre-registered administrator emails may leave the password blank.
+ */
+export async function loginAdmin(email: string, password?: string): Promise<LoginResult> {
+  const result = await apiRequest<{ authorized: boolean; user: AdminUser; token?: string }>(
+    '/api/auth/login',
+    { method: 'POST', body: JSON.stringify({ email, password }) }
+  );
 
-    if (!res.ok) {
-      return {
-        success: false,
-        authorized: false,
-        error: data.error || 'Login authorization failed.',
-      };
-    }
-
-    if (data.token) {
-      saveStoredToken(data.token);
-    }
-
-    return {
-      success: true,
-      authorized: true,
-      user: data.user,
-    };
-  } catch (err: any) {
-    return {
-      success: false,
-      authorized: false,
-      error: 'Network error connecting to authentication service.',
-    };
+  if (!result.ok) {
+    return { success: false, authorized: false, error: result.error };
   }
+
+  if (result.data.token) {
+    saveStoredToken(result.data.token);
+  }
+
+  return {
+    success: true,
+    authorized: Boolean(result.data.authorized),
+    user: result.data.user,
+  };
+}
+
+/**
+ * Creates a standard (non-staff) account. The user can sign in immediately.
+ */
+export async function registerAccount(name: string, email: string, password: string): Promise<LoginResult> {
+  const result = await apiRequest<{ user: AdminUser; token?: string }>('/api/auth/register', {
+    method: 'POST',
+    body: JSON.stringify({ name, email, password }),
+  });
+
+  if (!result.ok) {
+    return { success: false, authorized: false, error: result.error };
+  }
+
+  if (result.data.token) {
+    saveStoredToken(result.data.token);
+  }
+
+  return { success: true, authorized: false, user: result.data.user };
+}
+
+/**
+ * Always resolves with the same message, whether or not the account exists.
+ */
+export async function requestPasswordReset(email: string): Promise<{ ok: boolean; message: string }> {
+  const result = await apiRequest<{ message: string }>('/api/auth/forgot-password', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  });
+  if (!result.ok) return { ok: false, message: result.error };
+  return { ok: true, message: result.data.message };
+}
+
+export async function resetPassword(token: string, password: string): Promise<{ ok: boolean; message: string }> {
+  const result = await apiRequest<{ message: string }>('/api/auth/reset-password', {
+    method: 'POST',
+    body: JSON.stringify({ token, password }),
+  });
+  if (!result.ok) return { ok: false, message: result.error };
+  return { ok: true, message: result.data.message };
+}
+
+export async function listManagedUsers(params: { search?: string; role?: string; status?: string } = {}) {
+  const query = new URLSearchParams(
+    Object.entries(params).filter(([, v]) => v && v !== 'all') as [string, string][]
+  ).toString();
+  return apiRequest<ManagedUser[]>(`/api/admin/users${query ? `?${query}` : ''}`);
+}
+
+export async function createManagedUser(input: {
+  name: string;
+  email: string;
+  password: string;
+  role: StaffRole;
+  status: AccountStatus;
+}) {
+  return apiRequest<ManagedUser>('/api/admin/users', { method: 'POST', body: JSON.stringify(input) });
+}
+
+export async function updateManagedUser(
+  id: string,
+  input: { name?: string; role?: StaffRole; status?: AccountStatus; password?: string }
+) {
+  return apiRequest<ManagedUser>(`/api/admin/users/${id}`, { method: 'PATCH', body: JSON.stringify(input) });
+}
+
+export async function deleteManagedUser(id: string) {
+  return apiRequest<{ success: boolean }>(`/api/admin/users/${id}`, { method: 'DELETE' });
+}
+
+export async function createManagedUserResetLink(id: string) {
+  return apiRequest<{ resetUrl: string; expiresAt: string }>(`/api/admin/users/${id}/reset-link`, {
+    method: 'POST',
+  });
 }
 
 /**

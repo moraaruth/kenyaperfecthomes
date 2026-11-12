@@ -19,7 +19,8 @@ import {
   UserCheck
 } from 'lucide-react';
 import { Property } from '../../types';
-import { AdminUser, logoutAdmin } from '../../lib/authClient';
+import { AdminUser, logoutAdmin, isFullAdmin } from '../../lib/authClient';
+import { AdminUsersPanel } from './AdminUsersPanel';
 import { AddPropertyPage } from './AddPropertyPage';
 import { deleteProperty, updateProperty } from '../../lib/propertyStore';
 import { getCoverImageUrl, transformForThumbnail } from '../../lib/cloudinary';
@@ -71,7 +72,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
   onSignOut,
   onViewProperty,
 }) => {
-  const [activeTab, setActiveTab] = useState<'listings' | 'add' | 'bookings' | 'inquiries' | 'security'>('listings');
+  const [activeTab, setActiveTab] = useState<'listings' | 'add' | 'bookings' | 'inquiries' | 'users' | 'security'>('listings');
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState('All');
   
@@ -277,6 +278,20 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
               <span>Inquiries & Messages ({inquiries.length})</span>
             </button>
 
+            {isFullAdmin(adminUser) && (
+              <button
+                onClick={() => setActiveTab('users')}
+                className={`px-3.5 py-2 rounded-lg text-xs font-bold flex items-center gap-2 transition-colors whitespace-nowrap ${
+                  activeTab === 'users'
+                    ? 'bg-white text-neutral-900 shadow-xs'
+                    : 'text-neutral-300 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                <UserCheck className="w-3.5 h-3.5 text-brand-700" />
+                <span>User Accounts</span>
+              </button>
+            )}
+
           
           </div>
 
@@ -292,6 +307,11 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
             <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
             <span>{statusMessage}</span>
           </div>
+        )}
+
+        {/* TAB: USER ACCOUNTS (full admins only) */}
+        {activeTab === 'users' && isFullAdmin(adminUser) && (
+          <AdminUsersPanel currentEmail={adminUser.email} />
         )}
 
         {/* TAB 1: PROPERTY LISTINGS & INVENTORY */}
