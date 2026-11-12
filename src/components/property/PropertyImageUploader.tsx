@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { PropertyImage } from '../../types';
 import {
   Upload,
@@ -7,12 +7,37 @@ import {
   Star,
   ChevronLeft,
   ChevronRight,
-  RefreshCw,
   AlertCircle,
   CheckCircle2,
   Image as ImageIcon,
   Loader2,
 } from 'lucide-react';
+
+/**
+ * Resolves a raw secureUrl value to a renderable src string.
+ *
+ * Handles four cases:
+ *  1. Already a full URL (https:// or http://)  → use as-is
+ *  2. A data: URI (base64 dev fallback)          → use as-is
+ *  3. A valid absolute path (/images/foo.jpg)    → use as-is
+ *  4. A bare filename or relative path           → treat as broken, return fallback
+ */
+function resolveImageSrc(secureUrl: string | undefined): string {
+  const FALLBACK = '/images/property_westlands_apartment_1794311302942.jpg';
+  if (!secureUrl) return FALLBACK;
+  if (
+    secureUrl.startsWith('http://') ||
+    secureUrl.startsWith('https://') ||
+    secureUrl.startsWith('data:') ||
+    secureUrl.startsWith('blob:') ||
+    secureUrl.startsWith('/')
+  ) {
+    return secureUrl;
+  }
+  // Bare filename or relative path — not resolvable safely
+  console.warn('[PropertyImageUploader] Unresolvable image src, using fallback:', secureUrl);
+  return FALLBACK;
+}
 
 interface UploadItem {
   id: string;
@@ -43,6 +68,15 @@ export const PropertyImageUploader: React.FC<PropertyImageUploaderProps> = ({
   // Ref holds the latest images array so concurrent uploads never read a stale closure
   const imagesRef = useRef<PropertyImage[]>(images);
   imagesRef.current = images;
+  // Track object URLs we created so we can revoke them on cleanup
+  const objectUrlsRef = useRef<Set<string>>(new Set());
+
+  const revokeObjectUrl = useCallback((url: string) => {
+    if (url.startsWith('blob:') && objectUrlsRef.current.has(url)) {
+      URL.revokeObjectURL(url);
+      objectUrlsRef.current.delete(url);
+    }
+  }, []);
 
   const updateImagesList = (newImages: PropertyImage[]) => {
     const reindexed = newImages.map((img, idx) => ({ ...img, sortOrder: idx }));
@@ -92,8 +126,11 @@ export const PropertyImageUploader: React.FC<PropertyImageUploaderProps> = ({
       // Use ref so concurrent uploads always append to the latest list, never a stale snapshot
       updateImagesList([...imagesRef.current, uploadedMetadata]);
 
+      const completedId = item.id;
+      const completedPreviewUrl = item.previewUrl;
       setTimeout(() => {
-        setUploadQueue((prev) => prev.filter((i) => i.id !== item.id));
+        if (completedPreviewUrl) revokeObjectUrl(completedPreviewUrl);
+        setUploadQueue((prev) => prev.filter((i) => i.id !== completedId));
       }, 1200);
     } catch (err: any) {
       setUploadQueue((prev) =>
@@ -125,7 +162,10 @@ export const PropertyImageUploader: React.FC<PropertyImageUploaderProps> = ({
         continue;
       }
       let previewUrl = '';
-      try { previewUrl = URL.createObjectURL(file); } catch { previewUrl = ''; }
+      try {
+        previewUrl = URL.createObjectURL(file);
+        objectUrlsRef.current.add(previewUrl);
+      } catch { previewUrl = ''; }
       newItems.push({
         id: `upload_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
         file,
@@ -392,9 +432,16 @@ export const PropertyImageUploader: React.FC<PropertyImageUploaderProps> = ({
                   }`}
                 >
                   <img
-                    src={img.secureUrl}
+                    src={resolveImageSrc(img.secureUrl)}
                     alt={img.originalFilename || `Photo ${idx + 1}`}
                     className="w-full h-full object-cover"
+                    onError={(e) => {
+                      const el = e.currentTarget;
+                      const fallback = '/images/property_westlands_apartment_1794311302942.jpg';
+                      if (el.src !== window.location.origin + fallback) {
+                        el.src = fallback;
+                      }
+                    }}
                   />
 
                   {/* Gradient Scrim for Controls */}
