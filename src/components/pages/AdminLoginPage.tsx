@@ -55,7 +55,7 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({
   const handleSignIn = async () => {
     setIsAuthenticating(true);
     setErrorMessage(null);
-    const result = await loginAdmin(emailInput.trim(), password || undefined);
+    const result = await loginAdmin(emailInput.trim(), password);
     setIsAuthenticating(false);
 
     if (!result.success || !result.user) {

@@ -14,8 +14,6 @@ import { UserModel, USER_ROLES, USER_STATUSES } from './src/models/User.ts';
 import { normalizePropertyImages } from './src/lib/cloudinary.ts';
 import {
   normalizeEmail,
-  isAdminEmail,
-  createAdminSessionToken,
   createUserSessionToken,
   verifySessionSignature,
   resolveSession,
@@ -23,7 +21,6 @@ import {
   requireAdminAuth,
   requireAdminOnly,
   SESSION_COOKIE_NAME,
-  ADMIN_EMAILS,
   AuthenticatedRequest,
   UserRole,
 } from './src/lib/auth.ts';
@@ -61,7 +58,7 @@ app.use(async (_req: Request, _res: Response, next: NextFunction) => {
 });
 
 // Security: strict admin allowlist verification active
-console.log(`[Security] Strict Admin Allowlist Active (${ADMIN_EMAILS.length} authorized accounts configured)`);
+console.log('[Security] Administrator accounts are database-backed. Sign-in requires a password.');
 
 // Development Mode: Disable SSL verification for Cloudinary uploads
 // WARNING: Only use in development. Never disable SSL verification in production.
@@ -201,33 +198,15 @@ const registerLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 10 });
 const resetLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 10 });
 
 // POST /api/auth/login
-// Allowlisted administrator emails sign in by email only (unchanged).
-// All other emails must sign in with a password for a database account.
+// Every account, including the administrators, signs in with email and password.
 app.post('/api/auth/login', loginLimiter, async (req: Request, res: Response) => {
   try {
-    const { email, name, password } = req.body;
+    const { email, password } = req.body;
     if (!email) {
       return res.status(400).json({ error: 'Email address is required.' });
     }
 
     const normalized = normalizeEmail(email);
-
-    if (isAdminEmail(normalized)) {
-      const token = createAdminSessionToken(normalized, name);
-      setSessionCookie(res, token);
-      console.log(`[Security] Authorized admin session issued for: ${normalized}`);
-
-      return res.json({
-        success: true,
-        authorized: true,
-        user: {
-          email: normalized,
-          name: name || (normalized === 'iammoraaruth@gmail.com' ? 'Ruth Moraa' : 'Josiah M.'),
-          role: 'admin',
-        },
-        token,
-      });
-    }
 
     if (typeof password !== 'string' || !password) {
       return res.status(400).json({ error: 'Password is required.' });
@@ -254,6 +233,7 @@ app.post('/api/auth/login', loginLimiter, async (req: Request, res: Response) =>
       id: String(user._id),
       email: user.email,
       name: user.name,
+      role: user.role,
       tokenVersion: user.tokenVersion,
     });
     setSessionCookie(res, token);
@@ -289,7 +269,7 @@ app.post('/api/auth/register', registerLimiter, async (req: Request, res: Respon
     }
 
     const normalized = normalizeEmail(email);
-    const taken = isAdminEmail(normalized) || (await UserModel.exists({ email: normalized }));
+    const taken = await UserModel.exists({ email: normalized });
     if (taken) {
       return res.status(409).json({ error: 'An account with this email already exists.' });
     }
@@ -307,6 +287,7 @@ app.post('/api/auth/register', registerLimiter, async (req: Request, res: Respon
       id: String(user._id),
       email: user.email,
       name: user.name,
+      role: 'user',
       tokenVersion: user.tokenVersion,
     });
     setSessionCookie(res, token);
@@ -429,9 +410,8 @@ app.post('/api/auth/logout', async (req: Request, res: Response) => {
 
 const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-// Allowlisted admins always remain available, so the guard only applies when the allowlist is empty.
+// Every account is a database user, so the guard applies to the whole staff roster.
 async function wouldLeaveNoAdmins(excludeId: string): Promise<boolean> {
-  if (ADMIN_EMAILS.length > 0) return false;
   const remaining = await UserModel.countDocuments({ role: 'admin', status: 'active', _id: { $ne: excludeId } });
   return remaining === 0;
 }
@@ -475,10 +455,6 @@ app.post('/api/admin/users', requireAdminOnly as any, async (req: Request, res: 
     if (!(USER_STATUSES as readonly string[]).includes(status)) return res.status(400).json({ error: 'Invalid status.' });
 
     const normalized = normalizeEmail(email);
-    if (isAdminEmail(normalized)) {
-      return res.status(409).json({ error: 'An account with this email already exists.' });
-    }
-
     const user = await UserModel.create({
       name: name.trim(),
       email: normalized,

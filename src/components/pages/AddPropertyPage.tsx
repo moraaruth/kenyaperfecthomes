@@ -57,7 +57,7 @@ export const AddPropertyPage: React.FC<AddPropertyPageProps> = ({
 
   // Seller Details (Screenshot #12)
   const [sellerName, setSellerName] = useState(adminUser?.name || 'Ruth Moraa');
-  const [sellerEmail, setSellerEmail] = useState(adminUser?.email || 'iammoraaruth@gmail.com');
+  const [sellerEmail, setSellerEmail] = useState(adminUser?.email || '');
   const [sellerPhone, setSellerPhone] = useState('+254701029158');
 
   // Cloudinary Property Images State

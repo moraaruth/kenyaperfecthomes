@@ -107,9 +107,9 @@ export interface LoginResult {
 }
 
 /**
- * Signs in with email and password. Pre-registered administrator emails may leave the password blank.
+ * Signs in with email and password. Every account, including administrators, requires a password.
  */
-export async function loginAdmin(email: string, password?: string): Promise<LoginResult> {
+export async function loginAdmin(email: string, password: string): Promise<LoginResult> {
   const result = await apiRequest<{ authorized: boolean; user: AdminUser; token?: string }>(
     '/api/auth/login',
     { method: 'POST', body: JSON.stringify({ email, password }) }

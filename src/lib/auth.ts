@@ -1,9 +1,11 @@
 import crypto from 'crypto';
 import { Request, Response, NextFunction } from 'express';
-import { ADMIN_EMAILS, normalizeEmail, isAdminEmail } from './adminAccess';
 import { UserModel } from '../models/User.ts';
 
-export { ADMIN_EMAILS, normalizeEmail, isAdminEmail };
+export function normalizeEmail(email: string | null | undefined): string {
+  if (!email || typeof email !== 'string') return '';
+  return email.trim().toLowerCase();
+}
 
 export const SESSION_COOKIE_NAME = 'ph_admin_session';
 const SESSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -14,9 +16,9 @@ export interface AdminSession {
   email: string;
   name: string;
   role: UserRole;
-  // Present only for database accounts. Allowlisted admins have no uid.
-  uid?: string;
-  tokenVersion?: number;
+  // Every session belongs to a database account.
+  uid: string;
+  tokenVersion: number;
   issuedAt: number;
   expiresAt: number;
 }
@@ -28,8 +30,14 @@ export interface AuthenticatedRequest extends Request {
   adminUser?: AdminSession;
 }
 
-const getSecretKey = (): string => {
-  return process.env.ADMIN_SESSION_SECRET || 'perfect-homes-secure-admin-secret-2025';
+// Production requires ADMIN_SESSION_SECRET and fails closed without it.
+// Development generates a per-process secret, so sessions reset on restart.
+let devFallbackSecret: string | undefined;
+const getSecretKey = (): string | null => {
+  if (process.env.ADMIN_SESSION_SECRET) return process.env.ADMIN_SESSION_SECRET;
+  if (process.env.NODE_ENV === 'production') return null;
+  if (!devFallbackSecret) devFallbackSecret = crypto.randomBytes(32).toString('hex');
+  return devFallbackSecret;
 };
 
 /**
@@ -37,6 +45,9 @@ const getSecretKey = (): string => {
  * payload.signature (HMAC SHA-256)
  */
 export function signSessionToken(payload: SessionPayload): string {
+  const key = getSecretKey();
+  if (!key) throw new Error('ADMIN_SESSION_SECRET is not configured.');
+
   const session: AdminSession = {
     ...payload,
     issuedAt: Date.now(),
@@ -45,33 +56,19 @@ export function signSessionToken(payload: SessionPayload): string {
 
   const payloadStr = Buffer.from(JSON.stringify(session)).toString('base64url');
   const signature = crypto
-    .createHmac('sha256', getSecretKey())
+    .createHmac('sha256', key)
     .update(payloadStr)
     .digest('base64url');
 
   return `${payloadStr}.${signature}`;
 }
 
-/** Token for an allowlisted administrator (email-only sign-in, no database account). */
-export function createAdminSessionToken(email: string, name?: string): string {
-  const normalized = normalizeEmail(email);
-  if (!isAdminEmail(normalized)) {
-    throw new Error(`Unauthorized email address: ${normalized}`);
-  }
-
-  return signSessionToken({
-    email: normalized,
-    name: name || (normalized === 'iammoraaruth@gmail.com' ? 'Ruth Moraa' : 'Josiah M.'),
-    role: 'admin',
-  });
-}
-
 /** Token for a database account. Role and status are re-checked on every request. */
-export function createUserSessionToken(user: { id: string; email: string; name: string; tokenVersion: number }): string {
+export function createUserSessionToken(user: { id: string; email: string; name: string; role: UserRole; tokenVersion: number }): string {
   return signSessionToken({
     email: user.email,
     name: user.name,
-    role: 'user',
+    role: user.role,
     uid: user.id,
     tokenVersion: user.tokenVersion,
   });
@@ -83,12 +80,15 @@ export function createUserSessionToken(user: { id: string; email: string; name: 
 export function verifySessionSignature(token: string | null | undefined): AdminSession | null {
   if (!token || typeof token !== 'string') return null;
 
+  const key = getSecretKey();
+  if (!key) return null;
+
   const parts = token.split('.');
   if (parts.length !== 2) return null;
 
   const [payloadStr, signature] = parts;
   const expectedSig = crypto
-    .createHmac('sha256', getSecretKey())
+    .createHmac('sha256', key)
     .update(payloadStr)
     .digest('base64url');
 
@@ -116,18 +116,12 @@ export function verifySessionSignature(token: string | null | undefined): AdminS
 
 /**
  * Authorizes a session against current server state.
- * - Allowlisted admins (no uid): must still be on the allowlist.
- * - Database accounts: must exist, be active, and have a matching tokenVersion.
- *   The role comes from the database, so role changes apply immediately.
+ * Accounts must exist, be active, and have a matching tokenVersion.
+ * The role comes from the database, so role changes apply immediately.
  */
 export async function resolveSession(token: string | null | undefined): Promise<AdminSession | null> {
   const session = verifySessionSignature(token);
-  if (!session) return null;
-
-  if (!session.uid) {
-    if (!isAdminEmail(session.email)) return null;
-    return { ...session, role: 'admin' };
-  }
+  if (!session || !session.uid) return null;
 
   try {
     const user = await UserModel.findById(session.uid).select('email name role status tokenVersion').lean();

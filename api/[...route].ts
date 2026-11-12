@@ -105,30 +105,65 @@ const Booking = (mongoose.models.Booking as mongoose.Model<any>) ||
 const Inquiry = (mongoose.models.Inquiry as mongoose.Model<any>) ||
   mongoose.model('Inquiry', InquirySchema, 'inquiries');
 
-// ─── Admin allowlist ──────────────────────────────────────────────────────────
-
-const ADMIN_EMAILS = ['mnjosiah@gmail.com', 'iammoraaruth@gmail.com'];
-const norm = (e: string) => (e || '').trim().toLowerCase();
-const isAdmin = (e: string) => ADMIN_EMAILS.includes(norm(e));
-
 // ─── Session tokens ───────────────────────────────────────────────────────────
+
+const normalizeEmail = (e: string) => (e || '').trim().toLowerCase();
+
+// Failed-login brake. Per serverless instance, so it slows brute force but is not a global limit.
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_MAX_FAILURES = 5;
+const loginFailures = new Map<string, { count: number; resetAt: number }>();
+const failureKeys = (ip: string, email: string) => [`ip:${ip}`, `email:${email}`];
+
+function isLoginBlocked(ip: string, email: string): boolean {
+  const now = Date.now();
+  return failureKeys(ip, email).some((k) => {
+    const e = loginFailures.get(k);
+    return !!e && e.resetAt > now && e.count >= LOGIN_MAX_FAILURES;
+  });
+}
+
+function recordLoginFailure(ip: string, email: string) {
+  const now = Date.now();
+  for (const k of failureKeys(ip, email)) {
+    const e = loginFailures.get(k);
+    if (!e || e.resetAt <= now) loginFailures.set(k, { count: 1, resetAt: now + LOGIN_WINDOW_MS });
+    else e.count += 1;
+  }
+}
+
+function clearLoginFailures(ip: string, email: string) {
+  for (const k of failureKeys(ip, email)) loginFailures.delete(k);
+}
 
 const SESSION_COOKIE = 'ph_admin_session';
 const SESSION_MS = 7 * 24 * 60 * 60 * 1000;
-const secret = () => process.env.ADMIN_SESSION_SECRET || 'perfect-homes-secure-admin-secret-2025';
+
+// Fails closed in production when ADMIN_SESSION_SECRET is missing.
+let devSecret: string | undefined;
+const secret = (): string | null => {
+  if (process.env.ADMIN_SESSION_SECRET) return process.env.ADMIN_SESSION_SECRET;
+  if (process.env.NODE_ENV === 'production') return null;
+  if (!devSecret) devSecret = crypto.randomBytes(32).toString('hex');
+  return devSecret;
+};
 
 function signToken(payload: object): string {
+  const key = secret();
+  if (!key) throw new Error('ADMIN_SESSION_SECRET is not configured.');
   const data = Buffer.from(JSON.stringify({ ...payload, issuedAt: Date.now(), expiresAt: Date.now() + SESSION_MS })).toString('base64url');
-  const sig = crypto.createHmac('sha256', secret()).update(data).digest('base64url');
+  const sig = crypto.createHmac('sha256', key).update(data).digest('base64url');
   return `${data}.${sig}`;
 }
 
 function verifyToken(token: string | undefined): any | null {
   if (!token) return null;
+  const key = secret();
+  if (!key) return null;
   const parts = token.split('.');
   if (parts.length !== 2) return null;
   const [data, sig] = parts;
-  const expected = crypto.createHmac('sha256', secret()).update(data).digest('base64url');
+  const expected = crypto.createHmac('sha256', key).update(data).digest('base64url');
   const a = Buffer.from(sig), b = Buffer.from(expected);
   if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
   try {
@@ -140,8 +175,7 @@ function verifyToken(token: string | undefined): any | null {
 
 async function resolveSession(token: string | undefined): Promise<any | null> {
   const p = verifyToken(token);
-  if (!p) return null;
-  if (!p.uid) return isAdmin(p.email) ? p : null;
+  if (!p?.uid) return null;
   try {
     const u = await User.findById(p.uid).select('email name role status tokenVersion').lean();
     if (!u || u.status !== 'active' || u.tokenVersion !== p.tokenVersion) return null;
@@ -204,8 +238,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (err) return res.status(400).json({ error: err });
     if (!db) return res.status(503).json({ error: 'Account service is temporarily unavailable.' });
 
-    const normalized = norm(email);
-    if (isAdmin(normalized)) return res.status(409).json({ error: 'An account with this email already exists.' });
+    const normalized = normalizeEmail(email);
     const exists = await User.exists({ email: normalized });
     if (exists) return res.status(409).json({ error: 'An account with this email already exists.' });
 
@@ -224,24 +257,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // ── POST /api/auth/login ─────────────────────────────────────────────────
   if (path === '/api/auth/login' && method === 'POST') {
-    const { email, password, name } = req.body || {};
+    const { email, password } = req.body || {};
     if (!email) return res.status(400).json({ error: 'Email address is required.' });
-    const normalized = norm(email);
-
-    if (isAdmin(normalized)) {
-      const token = signToken({ email: normalized, name: name || (normalized === 'iammoraaruth@gmail.com' ? 'Ruth Moraa' : 'Josiah M.'), role: 'admin' });
-      setCookie(res, token);
-      return res.status(200).json({ success: true, authorized: true, user: { email: normalized, name: name || (normalized === 'iammoraaruth@gmail.com' ? 'Ruth Moraa' : 'Josiah M.'), role: 'admin' }, token });
-    }
+    const normalized = normalizeEmail(email);
 
     if (!password) return res.status(400).json({ error: 'Password is required.' });
     if (!db) return res.status(503).json({ error: 'Account service is temporarily unavailable.' });
 
+    const ip = String((req.headers['x-forwarded-for'] as string) || req.socket?.remoteAddress || 'unknown').split(',')[0].trim();
+    if (isLoginBlocked(ip, normalized)) {
+      return res.status(429).json({ error: 'Too many failed attempts. Please wait 15 minutes and try again.' });
+    }
+
     const user = await User.findOne({ email: normalized }).select('+passwordHash');
     const ok = user ? await bcrypt.compare(password, user.passwordHash) : false;
-    if (!user || !ok) return res.status(401).json({ error: 'Incorrect email or password.' });
+    if (!user || !ok) {
+      recordLoginFailure(ip, normalized);
+      return res.status(401).json({ error: 'Incorrect email or password.' });
+    }
     if (user.status !== 'active') return res.status(403).json({ error: 'This account is not active.' });
 
+    clearLoginFailures(ip, normalized);
     user.lastLogin = new Date();
     await user.save();
     const token = signToken({ email: user.email, name: user.name, role: user.role, uid: String(user._id), tokenVersion: user.tokenVersion });
