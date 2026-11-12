@@ -2,8 +2,40 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
-import { getImageAssetRefs, destroyImageAssets, ImageAssetRef } from '../src/lib/propertyImageAssets';
-import { isPasswordlessAdminEmail } from '../src/lib/passwordlessAdmins';
+const PASSWORDLESS_ADMIN_EMAILS = new Set(['mnjosiah@gmail.com', 'iammoraaruth@gmail.com']);
+const isPasswordlessAdminEmail = (email: string) => PASSWORDLESS_ADMIN_EMAILS.has(email.trim().toLowerCase());
+
+interface ImageAssetRef { publicId: string; resourceType: string; }
+
+function getImageAssetRefs(images: unknown[] = []): ImageAssetRef[] {
+  const seen = new Set<string>();
+  const refs: ImageAssetRef[] = [];
+  for (const image of images) {
+    if (!image || typeof image !== 'object') continue;
+    const { publicId, resourceType } = image as { publicId?: unknown; resourceType?: unknown };
+    if (typeof publicId !== 'string' || !publicId) continue;
+    const type = typeof resourceType === 'string' && resourceType ? resourceType : 'image';
+    const key = `${type}:${publicId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    refs.push({ publicId, resourceType: type });
+  }
+  return refs;
+}
+
+async function destroyImageAssets(
+  refs: ImageAssetRef[],
+  destroy: (ref: ImageAssetRef) => Promise<{ result?: string }>
+): Promise<string[]> {
+  const failed: string[] = [];
+  for (const ref of refs) {
+    try {
+      const r = await destroy(ref);
+      if (r.result !== 'ok' && r.result !== 'not found') failed.push(ref.publicId);
+    } catch { failed.push(ref.publicId); }
+  }
+  return failed;
+}
 
 function parseCookies(header: string): Record<string, string> {
   const out: Record<string, string> = {};
