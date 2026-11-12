@@ -12,6 +12,7 @@ import { BookingModel } from './src/models/Booking.ts';
 import { InquiryModel } from './src/models/Inquiry.ts';
 import { UserModel, USER_ROLES, USER_STATUSES } from './src/models/User.ts';
 import { normalizePropertyImages } from './src/lib/cloudinary.ts';
+import { getImageAssetRefs, destroyImageAssets } from './src/lib/propertyImageAssets.ts';
 import {
   normalizeEmail,
   createUserSessionToken,
@@ -155,6 +156,7 @@ export async function ensureDatabase(): Promise<void> {
   if (!_dbConnectionPromise) {
     _dbConnectionPromise = mongoose
       .connect(mongoUri, { bufferCommands: false })
+      .then(() => undefined)
       .catch((err) => {
         _dbConnectionPromise = null;
         if (!isProduction) console.error('[Database] Connection failed:', err.message);
@@ -933,25 +935,44 @@ app.patch('/api/properties/:id', requireAdminAuth as any, async (req: Authentica
   }
 });
 
-// DELETE /api/properties/:id (Protected: Delete Property)
-app.delete('/api/properties/:id', requireAdminAuth as any, async (req: AuthenticatedRequest, res: Response) => {
+// DELETE /api/properties/:id (Protected: admin only). Cloudinary assets are removed first; if any fail, the listing is kept so the delete can be retried.
+app.delete('/api/properties/:id', requireAdminOnly as any, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
+    const useDb = isMongoConnected();
 
-    if (isMongoConnected()) {
-      const deleted = await PropertyModel.findByIdAndDelete(id);
-      if (!deleted) return res.status(404).json({ error: 'Property not found' });
-      return res.json({ success: true, message: 'Property deleted successfully' });
+    const property = useDb
+      ? mongoose.isValidObjectId(id)
+        ? await PropertyModel.findById(id).lean()
+        : null
+      : inMemoryProperties.find((p) => p._id === id || p.id === id);
+    if (!property) return res.status(404).json({ error: 'Property not found' });
+
+    const refs = getImageAssetRefs((property as { images?: unknown[] }).images);
+    if (hasCloudinaryCredentials) {
+      const failed = await destroyImageAssets(refs, (ref) =>
+        cloudinary.uploader.destroy(ref.publicId, { resource_type: ref.resourceType })
+      );
+      if (failed.length > 0) {
+        console.error(`[Delete] Cloudinary failed to remove ${failed.length} asset(s) for property ${id}:`, failed);
+        return res.status(500).json({
+          error: 'Could not remove all images from Cloudinary. The listing was kept so you can retry.',
+          failedPublicIds: failed,
+        });
+      }
+    } else if (refs.length > 0) {
+      console.warn(`[Delete] Cloudinary is not configured; ${refs.length} asset(s) for property ${id} were not removed.`);
     }
 
-    const initialLen = inMemoryProperties.length;
-    inMemoryProperties = inMemoryProperties.filter((p) => p._id !== id && p.id !== id);
-    if (inMemoryProperties.length === initialLen) {
-      return res.status(404).json({ error: 'Property not found' });
+    if (useDb) {
+      await PropertyModel.deleteOne({ _id: id });
+    } else {
+      inMemoryProperties = inMemoryProperties.filter((p) => p._id !== id && p.id !== id);
     }
 
     return res.json({ success: true, message: 'Property deleted successfully' });
   } catch (err) {
+    console.error('[Delete] Failed to delete property:', err);
     return res.status(500).json({ error: 'Failed to delete property' });
   }
 });

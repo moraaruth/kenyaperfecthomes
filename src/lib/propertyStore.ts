@@ -157,30 +157,25 @@ export async function updateProperty(id: string, updates: Partial<Property>): Pr
   return list.find((p) => p._id === id || p.id === id) || null;
 }
 
-// Delete property (Protected)
-export async function deleteProperty(id: string): Promise<boolean> {
-  try {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('ph_admin_token') : null;
-    const headers: Record<string, string> = {};
+// Delete property (Protected). Throws on failure; local cache is only updated after the server confirms.
+export async function deleteProperty(id: string): Promise<void> {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('ph_admin_token') : null;
+  const headers: Record<string, string> = {};
     if (token) headers['Authorization'] = `Bearer ${token}`;
 
-    const res = await fetch(`/api/properties/${id}`, {
-      method: 'DELETE',
-      headers,
-      credentials: 'include',
-    });
+  const res = await fetch(`/api/properties/${id}`, {
+    method: 'DELETE',
+    headers,
+    credentials: 'include',
+  });
 
-    if (res.status === 401 || res.status === 403) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'Unauthorized');
-    }
-  } catch (err) {
-    // delete failure is non-critical; local state is already updated
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Delete failed (${res.status}).`);
   }
 
   const remaining = getStoredProperties().filter((p) => p._id !== id && p.id !== id);
   saveStoredProperties(remaining);
-  return true;
 }
 
 // Saved properties

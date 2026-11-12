@@ -84,6 +84,9 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
   const [bookings, setBookings] = useState<BookingRecord[]>([]);
   const [inquiries, setInquiries] = useState<InquiryRecord[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<Property | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   // Load Bookings & Inquiries
@@ -148,21 +151,34 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
     }
   };
 
-  const handleDelete = async (property: Property) => {
-    const propId = property._id || property.id || '';
-    if (!propId) return;
+  const handleDelete = (property: Property) => {
+    if (!(property._id || property.id)) return;
+    setDeleteError(null);
+    setPendingDelete(property);
+  };
 
-    const confirmed = window.confirm(
-      `Are you sure you want to delete "${property.title}"? This will permanently remove the listing from the marketplace.`
-    );
-    if (!confirmed) return;
+  const closeDeleteDialog = () => {
+    if (deletingId !== null) return;
+    setPendingDelete(null);
+    setDeleteError(null);
+  };
 
+  const confirmDelete = async () => {
+    const property = pendingDelete;
+    const propId = property?._id || property?.id || '';
+    if (!property || !propId) return;
+
+    setDeletingId(propId);
+    setDeleteError(null);
     try {
       await deleteProperty(propId);
+      setPendingDelete(null);
       if (onPropertyDeleted) onPropertyDeleted(propId);
       showNotice(`Successfully deleted listing: "${property.title}"`);
     } catch (err) {
-      alert('Failed to delete property. Please verify your admin session.');
+      setDeleteError(err instanceof Error ? err.message : 'Failed to delete listing.');
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -310,6 +326,56 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
       {/* Main Content Area */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8">
         
+        {/* Delete confirmation */}
+        {pendingDelete && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-900/50 p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-listing-title"
+          >
+            <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl space-y-4">
+              <div className="flex items-start gap-3">
+                <div className="p-2 rounded-full bg-rose-50 text-rose-600 shrink-0">
+                  <Trash2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 id="delete-listing-title" className="font-bold text-neutral-900">Delete this listing?</h3>
+                  <p className="text-xs text-neutral-600 mt-1">
+                    "{pendingDelete.title}" and its photos will be permanently removed from the marketplace and Cloudinary. This cannot be undone.
+                  </p>
+                </div>
+              </div>
+
+              {deleteError && (
+                <p className="text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-3">
+                  {deleteError}
+                </p>
+              )}
+
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={closeDeleteDialog}
+                  disabled={deletingId !== null}
+                  className="px-4 py-2 rounded-lg text-xs font-bold text-neutral-700 hover:bg-neutral-100 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmDelete}
+                  disabled={deletingId !== null}
+                  className="px-4 py-2 rounded-lg text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-60 inline-flex items-center gap-2"
+                >
+                  {deletingId !== null && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                  {deletingId !== null ? 'Deleting…' : 'Delete listing'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Status notification */}
         {statusMessage && (
           <div className="mb-6 p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-semibold flex items-center gap-2.5 shadow-xs animate-in fade-in">

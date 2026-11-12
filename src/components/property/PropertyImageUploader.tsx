@@ -216,7 +216,7 @@ export const PropertyImageUploader: React.FC<PropertyImageUploaderProps> = ({
           headers,
           credentials: 'include',
         });
-      } catch {
+      } catch (err) {
         console.warn('Failed to delete asset from Cloudinary:', err);
       }
     }

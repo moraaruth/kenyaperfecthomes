@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
-import * as cookieLib from 'cookie';
+import { getImageAssetRefs, destroyImageAssets, ImageAssetRef } from '../src/lib/propertyImageAssets';
 
 function parseCookies(header: string): Record<string, string> {
   const out: Record<string, string> = {};
@@ -213,6 +213,15 @@ function sanitizeUser(u: any) {
 
 // ─── Main handler ─────────────────────────────────────────────────────────────
 
+// Removes Cloudinary assets for a listing; returns the publicIds that could not be removed.
+async function destroyCloudinaryAssets(refs: ImageAssetRef[]): Promise<string[]> {
+  const hasCloudinary = Boolean(process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET);
+  if (!hasCloudinary) return [];
+  const { v2: cloudinary } = await import('cloudinary');
+  cloudinary.config({ cloud_name: process.env.CLOUDINARY_CLOUD_NAME, api_key: process.env.CLOUDINARY_API_KEY, api_secret: process.env.CLOUDINARY_API_SECRET, secure: true });
+  return destroyImageAssets(refs, (ref) => cloudinary.uploader.destroy(ref.publicId, { resource_type: ref.resourceType }));
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Content-Type', 'application/json');
 
@@ -365,11 +374,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // ── DELETE /api/properties/:id ───────────────────────────────────────────
   if (propMatch && method === 'DELETE') {
     const session = await resolveSession(getToken(req));
-    if (!session || (session.role !== 'admin' && session.role !== 'agent')) return res.status(401).json({ error: 'Authentication required.' });
+    if (!session) return res.status(401).json({ error: 'Authentication required.' });
+    if (session.role !== 'admin') return res.status(403).json({ error: 'Admin access required.' });
     if (!db) return res.status(503).json({ error: 'Database unavailable.' });
-    const deleted = await Property.findByIdAndDelete(propMatch[1]);
-    if (!deleted) return res.status(404).json({ error: 'Property not found.' });
-    return res.status(200).json({ success: true });
+
+    const id = propMatch[1];
+    if (!mongoose.isValidObjectId(id)) return res.status(404).json({ error: 'Property not found.' });
+
+    try {
+      const property = await Property.findById(id).lean();
+      if (!property) return res.status(404).json({ error: 'Property not found.' });
+
+      // Assets go first: if any removal fails, the listing is kept so the admin can retry.
+      const failed = await destroyCloudinaryAssets(getImageAssetRefs(property.images as unknown[]));
+      if (failed.length > 0) {
+        console.error(`[Delete] Cloudinary failed to remove ${failed.length} asset(s) for property ${id}:`, failed);
+        return res.status(500).json({
+          error: 'Could not remove all images from Cloudinary. The listing was kept so you can retry.',
+          failedPublicIds: failed,
+        });
+      }
+
+      await Property.deleteOne({ _id: id });
+      return res.status(200).json({ success: true });
+    } catch (err) {
+      console.error('[Delete] Failed to delete property:', err);
+      return res.status(500).json({ error: 'Failed to delete property.' });
+    }
   }
 
   // ── POST /api/bookings ───────────────────────────────────────────────────
