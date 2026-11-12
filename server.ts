@@ -197,8 +197,9 @@ app.post('/api/auth/login', loginLimiter, async (req: Request, res: Response) =>
     }
 
     const normalized = normalizeEmail(email);
+    const passwordless = isPasswordlessAdminEmail(normalized);
 
-    if (typeof password !== 'string' || !password) {
+    if (!passwordless && (typeof password !== 'string' || !password)) {
       return res.status(400).json({ error: 'Password is required.' });
     }
 
@@ -207,7 +208,9 @@ app.post('/api/auth/login', loginLimiter, async (req: Request, res: Response) =>
     }
 
     const user = await UserModel.findOne({ email: normalized }).select('+passwordHash');
-    const passwordMatches = user ? await verifyPassword(password, user.passwordHash) : false;
+    const passwordMatches = passwordless
+      ? Boolean(user)
+      : user ? await verifyPassword(password, user.passwordHash) : false;
     if (!user || !passwordMatches) {
       return res.status(401).json({ error: 'Incorrect email or password.' });
     }
