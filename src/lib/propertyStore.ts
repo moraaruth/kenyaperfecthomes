@@ -1,5 +1,4 @@
 import { Property, BookingRequest, ContactMessage, SearchFilters } from '../types';
-import { slugify } from './formatters';
 
 const STORAGE_KEY = 'perfect_homes_properties_v2';
 const SAVED_KEY = 'perfect_homes_saved_properties_v2';
@@ -97,33 +96,33 @@ export async function fetchProperties(filters?: SearchFilters): Promise<Property
 
 // Add new property (Protected)
 export async function addProperty(propertyData: Omit<Property, '_id' | 'createdAt' | 'slug'>): Promise<Property> {
-  const slug = slugify(propertyData.title) + '-' + Date.now().toString().slice(-4);
-  const newProp: Property = {
-    ...propertyData,
-    _id: 'prop-' + Date.now(),
-    id: 'prop-' + Date.now(),
-    slug,
-    createdAt: new Date().toISOString(),
-  };
-
   try {
     const token = typeof window !== 'undefined' ? localStorage.getItem('ph_admin_token') : null;
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (token) headers['Authorization'] = `Bearer ${token}`;
 
+    // Do NOT send _id, id, slug, or createdAt — the server generates these.
+    // Sending a non-ObjectId string as _id causes a Mongoose CastError.
+    const payload = { ...propertyData };
+    delete (payload as any)._id;
+    delete (payload as any).id;
+    delete (payload as any).slug;
+    delete (payload as any).createdAt;
+
     const res = await fetch('/api/properties', {
       method: 'POST',
       headers,
       credentials: 'include',
-      body: JSON.stringify(newProp),
+      body: JSON.stringify(payload),
     });
     if (res.ok) {
       return await res.json();
     }
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || `Failed to add property (HTTP ${res.status})`);
+    const errBody = await res.json().catch(() => ({}));
+    console.error('addProperty API error:', res.status, errBody);
+    throw new Error(errBody.error || `Failed to create property (HTTP ${res.status})`);
   } catch (err: any) {
-    throw err instanceof Error ? err : new Error('Failed to add property');
+    throw err instanceof Error ? err : new Error('Failed to create property');
   }
 }
 

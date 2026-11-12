@@ -314,7 +314,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const created = await Property.create({ ...req.body, slug, price: Number(price) });
       return res.status(201).json(created);
     } catch (e: any) {
-      return res.status(500).json({ error: 'Failed to create property.' });
+      console.error('[Properties] Create failed:', e?.name, e?.message);
+      const isValidation = e?.name === 'ValidationError';
+      return res.status(isValidation ? 400 : 500).json({
+        error: `Failed to create property: ${e?.message || 'unknown error'}`,
+      });
     }
   }
 
