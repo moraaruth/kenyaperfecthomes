@@ -30,7 +30,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ onSearch, onSelectNeig
         alt="Modern home in Nairobi"
         className="absolute inset-0 w-full h-full object-cover object-center"
       />
-      <div className="absolute inset-0 bg-black/55" />
+      <div className="absolute inset-0 bg-black/75" />
 
       <div className="relative z-10 max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-20 text-center">
         <h1 className="text-4xl sm:text-5xl md:text-6xl font-black text-white tracking-tight mb-4 max-w-3xl mx-auto">

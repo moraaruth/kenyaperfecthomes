@@ -610,14 +610,12 @@ app.post('/api/admin/users/:id/reset-link', requireAdminOnly as any, async (req:
 // Helper to stream upload buffer to Cloudinary
 function uploadToCloudinary(buffer: Buffer, originalFilename: string, mimetype: string): Promise<UploadApiResponse> {
   return new Promise((resolve, reject) => {
-    const isSvg = mimetype === 'image/svg+xml' || originalFilename.toLowerCase().endsWith('.svg');
-
+    // SVG is an image format; keep it as resource_type 'image' so it renders via <img> and gets f_auto delivery.
+    // Do not pass `format`/`quality` at upload: they are delivery concerns (see src/lib/cloudinary.ts).
     const uploadStream = cloudinary.uploader.upload_stream(
       {
         folder: 'perfect_homes/properties',
-        resource_type: isSvg ? 'raw' : 'image',
-        format: isSvg ? undefined : 'auto', // Auto-transcode HEIC/HEIF to WebP/JPG for browsers
-        quality: isSvg ? undefined : 'auto',
+        resource_type: 'image',
       },
       (error, result) => {
         if (error) return reject(error);

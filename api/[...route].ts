@@ -438,6 +438,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'No image file found in request.' });
     }
 
+    // SVG safety: reject SVGs containing script or active-content markers
+    const isSvg = mimetype === 'image/svg+xml' || originalFilename.toLowerCase().endsWith('.svg');
+    if (isSvg) {
+      const svgText = fileBuffer.toString('utf8').toLowerCase();
+      const dangerousPatterns = ['<script', 'javascript:', '<iframe', '<object', '<embed', 'onload=', 'onerror=', 'onclick='];
+      if (dangerousPatterns.some((p) => svgText.includes(p))) {
+        return res.status(400).json({ error: 'Security rejection: Uploaded SVG contains unsafe or executable scripts.' });
+      }
+    }
+
     // Try Cloudinary if credentials are set
     const hasCloudinary = Boolean(
       process.env.CLOUDINARY_CLOUD_NAME &&
@@ -455,9 +465,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           secure: true,
         });
 
+        // Upload the original asset unchanged. Do not pass `format` or `quality` here:
+        // upload `format` sets the stored file extension (so 'auto' is invalid), and
+        // delivery optimisation (f_auto,q_auto) is applied at URL level in src/lib/cloudinary.ts.
         const result: any = await new Promise((resolve, reject) => {
           const stream = cloudinary.uploader.upload_stream(
-            { folder: 'perfect_homes/properties', resource_type: 'image', format: 'auto', quality: 'auto' },
+            { folder: 'perfect_homes/properties', resource_type: 'image' },
             (err, r) => err ? reject(err) : resolve(r)
           );
           stream.end(fileBuffer!);
@@ -476,12 +489,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           isCover: false,
         });
       } catch (e: any) {
-        console.error('Cloudinary upload error:', e?.message);
-        // fall through to base64 fallback
+        console.error('Cloudinary upload error:', e?.message, e?.http_code);
+        return res.status(502).json({
+          error: e?.message || 'Image upload to Cloudinary failed. Please try again.',
+        });
       }
     }
 
-    // Fallback: return base64 data URL so the UI still works without Cloudinary
+    // Fallback (Cloudinary not configured): base64 data URL so local development still works
     const base64 = fileBuffer.toString('base64');
     const safeType = mimetype !== 'application/octet-stream' ? mimetype : 'image/jpeg';
     return res.status(201).json({
